@@ -61,7 +61,15 @@
     transform: translateY(-50%);
     z-index: 20;
     flex-direction: row;
-    align-items: flex-start;
+    align-items: center;
+    /* Fixed, not auto: the group's own height used to equal whichever
+       panel was tallest for the active category, and since the group is
+       centered via top:50%/translateY(-50%), that made the whole rail
+       (tabs included) visibly shift up/down every time you switched
+       categories or expanded/collapsed the panel. A constant height keeps
+       the centering anchor — and therefore the tabs' position — fixed
+       regardless of what the panel currently contains. */
+    height: 75vh;
   }
 }
 
