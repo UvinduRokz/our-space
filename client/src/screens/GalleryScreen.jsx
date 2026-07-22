@@ -34,21 +34,21 @@ export default function GalleryScreen() {
     <section className="screen screen--scrollable">
       <BackButton to="activities" />
       <h1>Gallery</h1>
-      <div className="gallery-grid">
-        {failed && <p className="gallery-empty">couldn't load the gallery right now</p>}
-        {!failed && drawings && drawings.length === 0 && (
-          <p className="gallery-empty">no drawings saved yet — go make one 💕</p>
-        )}
-        {!failed &&
-          drawings &&
-          drawings.map((d) => (
+      {failed && <p className="gallery-empty">couldn't load the gallery right now</p>}
+      {!failed && drawings && drawings.length === 0 && (
+        <p className="gallery-empty">no drawings saved yet — go make one 💕</p>
+      )}
+      {!failed && drawings && drawings.length > 0 && (
+        <div className="gallery-grid">
+          {drawings.map((d) => (
             <div className="gallery-tile" key={d.id} onClick={() => setSelected(d)}>
               <img src={d.url} alt="a saved drawing" loading="lazy" />
               <span className="gallery-tile-tag">{d.side === 'blue' ? '💙' : '💗'}</span>
               <span className="gallery-tile-date">{formatDate(d.ts)}</span>
             </div>
           ))}
-      </div>
+        </div>
+      )}
 
       {selected && (
         <Modal
