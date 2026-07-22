@@ -144,6 +144,10 @@
 .draw-tool-primary {
   background: linear-gradient(90deg, #4caf6d, #3d9a5c);
 }
+.draw-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
 .draw-tool-label {
   font-size: 0.95rem;
 }

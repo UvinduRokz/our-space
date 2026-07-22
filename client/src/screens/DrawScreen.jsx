@@ -15,6 +15,16 @@ const SHAPE_TOOL_TYPES = ['line', 'rect', 'ellipse', 'arrow'];
 const DASH_STYLES = ['solid', 'dashed', 'dotted'];
 const BRUSH_TYPES = ['pencil', 'brush', 'marker'];
 
+function distToSegment(p, a, b) {
+  const dx = b.x - a.x;
+  const dy = b.y - a.y;
+  const lengthSq = dx * dx + dy * dy;
+  if (lengthSq === 0) return Math.hypot(p.x - a.x, p.y - a.y);
+  let t = ((p.x - a.x) * dx + (p.y - a.y) * dy) / lengthSq;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
+}
+
 // Fixed on purpose: the canvas used to just stretch to fill whichever
 // device's screen it was on, so the same fractional stroke coordinates
 // drew a different shape (circle vs. ellipse) for each partner. Locking
@@ -42,6 +52,9 @@ export default function DrawScreen() {
     strokes: { blue: [], pink: [] },
     shapeStart: null, // fractional {x,y} where a shape drag began
     shapePreview: null, // in-progress shape object, local-only until pointerup commits it
+    selectedId: null, // authoritative selection for the Select tool (mirrored into React state for UI only)
+    dragStartPoint: null, // fractional {x,y} where a select-tool drag began
+    dragOrigPoints: null, // the selected object's points at drag start, so deltas don't compound across pointermove events
   });
   // latest tool settings, readable from the stable (attached-once) pointer
   // handlers without needing to re-bind listeners whenever a tool changes
@@ -66,13 +79,17 @@ export default function DrawScreen() {
   const [fontSize, setFontSize] = useState(24);
   const [fontSizePopoverOpen, setFontSizePopoverOpen] = useState(false);
   const [textEditing, setTextEditing] = useState(null); // { x, y (fractional canvas point), value } while placing a text object
+  const [selectedId, setSelectedId] = useState(null); // mirrors engineRef.current.selectedId, for UI only (delete button, keyboard shortcut)
   const [gridVisible, setGridVisible] = useState(false);
   const [status, setStatus] = useState({ text: '', show: false });
   const [reveal, setReveal] = useState(null); // saved drawing url, or null
   const statusTimerRef = useRef(null);
 
   const activeCategory =
-    activeTool === 'eraser' ? 'eraser' : activeTool === 'text' ? 'text' : SHAPE_TOOL_TYPES.includes(activeTool) ? 'shapes' : 'draw';
+    activeTool === 'eraser' ? 'eraser' :
+    activeTool === 'text' ? 'text' :
+    activeTool === 'select' ? 'select' :
+    SHAPE_TOOL_TYPES.includes(activeTool) ? 'shapes' : 'draw';
 
   useEffect(() => {
     toolRef.current = {
@@ -212,9 +229,102 @@ export default function DrawScreen() {
     resetDrawState(ctx);
   }
 
+  // Bounding box in pixel space, for both the Select tool's highlight
+  // outline and (for rect/ellipse/text) its hit-testing.
+  function getObjectBounds(obj, rect) {
+    const toPx = (p) => ({ x: p.x * rect.width, y: p.y * rect.height });
+    if (!obj.type || obj.type === 'freehand') {
+      const pts = (obj.points || []).map(toPx);
+      if (!pts.length) return null;
+      const xs = pts.map((p) => p.x);
+      const ys = pts.map((p) => p.y);
+      const pad = (obj.width || 4) / 2 + 4;
+      return { x: Math.min(...xs) - pad, y: Math.min(...ys) - pad, w: Math.max(...xs) - Math.min(...xs) + pad * 2, h: Math.max(...ys) - Math.min(...ys) + pad * 2 };
+    }
+    if (obj.type === 'text') {
+      const ctx = ctxRef.current;
+      ctx.font = `${obj.fontSize || 24}px sans-serif`;
+      const width = ctx.measureText(obj.text || '').width;
+      const height = obj.fontSize || 24;
+      const p = toPx(obj.points[0]);
+      return { x: p.x - 3, y: p.y - 3, w: width + 6, h: height + 6 };
+    }
+    const [p1, p2] = obj.points;
+    const a = toPx(p1);
+    const b = toPx(p2 || p1);
+    const pad = (obj.width || 4) / 2 + 6;
+    return { x: Math.min(a.x, b.x) - pad, y: Math.min(a.y, b.y) - pad, w: Math.abs(b.x - a.x) + pad * 2, h: Math.abs(b.y - a.y) + pad * 2 };
+  }
+
+  // Point-precise hit-testing for the Select tool — thin/diagonal shapes
+  // (freehand/line/arrow) use distance-to-segment so clicking far from the
+  // actual line inside its bounding box doesn't count; filled-ish shapes
+  // (rect/ellipse/text) just check "inside," which matches how people
+  // expect to click those.
+  function hitTestObject(pxPoint, obj, rect) {
+    const toPx = (p) => ({ x: p.x * rect.width, y: p.y * rect.height });
+    const tolerance = Math.max(10, (obj.width || 4) / 2 + 6);
+    if (!obj.type || obj.type === 'freehand') {
+      const pts = obj.points || [];
+      for (let i = 1; i < pts.length; i++) {
+        if (distToSegment(pxPoint, toPx(pts[i - 1]), toPx(pts[i])) <= tolerance) return true;
+      }
+      return pts.length === 1 && Math.hypot(pxPoint.x - toPx(pts[0]).x, pxPoint.y - toPx(pts[0]).y) <= tolerance;
+    }
+    if (obj.type === 'line' || obj.type === 'arrow') {
+      const [p1, p2] = obj.points;
+      return distToSegment(pxPoint, toPx(p1), toPx(p2)) <= tolerance;
+    }
+    if (obj.type === 'rect') {
+      const [p1, p2] = obj.points;
+      const a = toPx(p1);
+      const b = toPx(p2);
+      const x = Math.min(a.x, b.x);
+      const y = Math.min(a.y, b.y);
+      const w = Math.abs(b.x - a.x);
+      const h = Math.abs(b.y - a.y);
+      return pxPoint.x >= x - tolerance && pxPoint.x <= x + w + tolerance && pxPoint.y >= y - tolerance && pxPoint.y <= y + h + tolerance;
+    }
+    if (obj.type === 'ellipse') {
+      const [p1, p2] = obj.points;
+      const a = toPx(p1);
+      const b = toPx(p2);
+      const cx = (a.x + b.x) / 2;
+      const cy = (a.y + b.y) / 2;
+      const rx = Math.abs(b.x - a.x) / 2 + tolerance;
+      const ry = Math.abs(b.y - a.y) / 2 + tolerance;
+      if (rx <= 0 || ry <= 0) return false;
+      const nx = (pxPoint.x - cx) / rx;
+      const ny = (pxPoint.y - cy) / ry;
+      return nx * nx + ny * ny <= 1;
+    }
+    if (obj.type === 'text') {
+      const bounds = getObjectBounds(obj, rect);
+      if (!bounds) return false;
+      return (
+        pxPoint.x >= bounds.x - tolerance && pxPoint.x <= bounds.x + bounds.w + tolerance &&
+        pxPoint.y >= bounds.y - tolerance && pxPoint.y <= bounds.y + bounds.h + tolerance
+      );
+    }
+    return false;
+  }
+
+  function drawSelectionHighlight(obj, rect) {
+    const ctx = ctxRef.current;
+    const bounds = getObjectBounds(obj, rect);
+    if (!bounds) return;
+    ctx.save();
+    ctx.strokeStyle = '#4f8fff';
+    ctx.lineWidth = 2;
+    ctx.setLineDash([6, 4]);
+    ctx.strokeRect(bounds.x, bounds.y, bounds.w, bounds.h);
+    ctx.restore();
+  }
+
   function redrawAll() {
     const canvas = canvasRef.current;
     const ctx = ctxRef.current;
+    const rect = canvas.getBoundingClientRect();
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const strokes = engineRef.current.strokes;
     ['blue', 'pink'].forEach((s) => {
@@ -228,6 +338,11 @@ export default function DrawScreen() {
       });
     });
     if (engineRef.current.shapePreview) drawShape(engineRef.current.shapePreview);
+    const selId = engineRef.current.selectedId;
+    if (selId) {
+      const obj = engineRef.current.strokes[side].find((o) => o.id === selId);
+      if (obj) drawSelectionHighlight(obj, rect);
+    }
   }
 
   function resize() {
@@ -265,6 +380,20 @@ export default function DrawScreen() {
     window.addEventListener('resize', computeStageSize);
     return () => window.removeEventListener('resize', computeStageSize);
   }, []);
+
+  useEffect(() => {
+    function onKeyDown(e) {
+      if (e.key !== 'Delete' && e.key !== 'Backspace') return;
+      if (activeTool !== 'select' || !selectedId) return;
+      // don't steal Backspace from an actual text field elsewhere on the page
+      if (document.activeElement && document.activeElement.tagName === 'INPUT') return;
+      e.preventDefault();
+      deleteSelected();
+    }
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTool, selectedId]);
 
   // Runs whenever the letterboxed stage box changes size — separate from
   // the socket-setup effect below so the canvas pixel buffer stays in sync
@@ -312,6 +441,32 @@ export default function DrawScreen() {
         // discarding the text box before the user can type anything.
         e.preventDefault();
         setTextEditing({ x: cp.x, y: cp.y, value: '' });
+        return;
+      }
+
+      if (tool === 'select') {
+        const rect = canvas.getBoundingClientRect();
+        const pxPoint = { x: cp.x * rect.width, y: cp.y * rect.height };
+        const list = eng.strokes[side];
+        let hitObj = null;
+        for (let i = list.length - 1; i >= 0; i--) {
+          if (hitTestObject(pxPoint, list[i], rect)) {
+            hitObj = list[i];
+            break;
+          }
+        }
+        if (hitObj) {
+          canvas.setPointerCapture(e.pointerId);
+          eng.selectedId = hitObj.id;
+          eng.dragStartPoint = cp;
+          eng.dragOrigPoints = hitObj.points.map((pt) => ({ ...pt }));
+        } else {
+          eng.selectedId = null;
+          eng.dragStartPoint = null;
+          eng.dragOrigPoints = null;
+        }
+        setSelectedId(eng.selectedId);
+        redrawAll();
         return;
       }
 
@@ -367,6 +522,15 @@ export default function DrawScreen() {
         const p = clampFrac(toFrac(e.clientX, e.clientY));
         eng.shapePreview.points = [eng.shapeStart, p];
         redrawAll();
+      } else if (tool === 'select') {
+        if (!eng.selectedId || !eng.dragStartPoint) return;
+        const p = clampFrac(toFrac(e.clientX, e.clientY));
+        const dx = p.x - eng.dragStartPoint.x;
+        const dy = p.y - eng.dragStartPoint.y;
+        const obj = eng.strokes[side].find((o) => o.id === eng.selectedId);
+        if (!obj) return;
+        obj.points = eng.dragOrigPoints.map((pt) => clampFrac({ x: pt.x + dx, y: pt.y + dy }));
+        redrawAll();
       }
     }
 
@@ -403,11 +567,19 @@ export default function DrawScreen() {
           points: shape.points,
         });
         redrawAll();
+      } else if (tool === 'select') {
+        if (!eng.selectedId || !eng.dragStartPoint) return;
+        eng.dragStartPoint = null;
+        eng.dragOrigPoints = null;
+        const obj = eng.strokes[side].find((o) => o.id === eng.selectedId);
+        if (!obj) return;
+        socket.emit('draw:object-move', { id: obj.id, points: obj.points });
       }
     }
 
     function onRemoteState(state) {
       eng.strokes = { blue: state.blue || [], pink: state.pink || [] };
+      clearStaleSelection();
       redrawAll();
     }
     function onRemoteStart({ side: fromSide, id, point, color, width, dash, erase, brushType: brush, gradient, color2 }) {
@@ -436,9 +608,24 @@ export default function DrawScreen() {
       eng.strokes[fromSide].push(object);
       redrawAll();
     }
+    function onObjectMove({ side: fromSide, id, points }) {
+      if (fromSide === side) return; // our own, already applied locally in onPointerUp
+      const obj = eng.strokes[fromSide].find((o) => o.id === id);
+      if (!obj) return;
+      obj.points = points;
+      redrawAll();
+    }
+    function onObjectDelete({ side: fromSide, id }) {
+      if (fromSide === side) return;
+      const list = eng.strokes[fromSide];
+      const idx = list.findIndex((o) => o.id === id);
+      if (idx !== -1) list.splice(idx, 1);
+      redrawAll();
+    }
     function onUndo({ side: fromSide }) {
       if (!eng.strokes[fromSide].length) return;
       eng.strokes[fromSide].pop();
+      clearStaleSelection();
       redrawAll();
     }
     function onRedo({ side: fromSide, stroke }) {
@@ -447,7 +634,16 @@ export default function DrawScreen() {
     }
     function onCleared() {
       eng.strokes = { blue: [], pink: [] };
+      clearStaleSelection();
       redrawAll();
+    }
+    function clearStaleSelection() {
+      if (eng.selectedId && !eng.strokes[side].some((o) => o.id === eng.selectedId)) {
+        eng.selectedId = null;
+        eng.dragStartPoint = null;
+        eng.dragOrigPoints = null;
+        setSelectedId(null);
+      }
     }
 
     canvas.addEventListener('pointerdown', onPointerDown);
@@ -459,6 +655,8 @@ export default function DrawScreen() {
     socket.on('draw:stroke-start', onRemoteStart);
     socket.on('draw:stroke-points', onRemotePoints);
     socket.on('draw:shape-commit', onShapeCommit);
+    socket.on('draw:object-move', onObjectMove);
+    socket.on('draw:object-delete', onObjectDelete);
     socket.on('draw:undo', onUndo);
     socket.on('draw:redo', onRedo);
     socket.on('draw:cleared', onCleared);
@@ -474,6 +672,8 @@ export default function DrawScreen() {
       socket.off('draw:stroke-start', onRemoteStart);
       socket.off('draw:stroke-points', onRemotePoints);
       socket.off('draw:shape-commit', onShapeCommit);
+      socket.off('draw:object-move', onObjectMove);
+      socket.off('draw:object-delete', onObjectDelete);
       socket.off('draw:undo', onUndo);
       socket.off('draw:redo', onRedo);
       socket.off('draw:cleared', onCleared);
@@ -481,6 +681,8 @@ export default function DrawScreen() {
       eng.lastLocalPoint = null;
       eng.shapeStart = null;
       eng.shapePreview = null;
+      eng.dragStartPoint = null;
+      eng.dragOrigPoints = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, side]);
@@ -492,6 +694,11 @@ export default function DrawScreen() {
     setDashPopoverOpen(false);
     setFontSizePopoverOpen(false);
     commitText();
+    engineRef.current.selectedId = null;
+    engineRef.current.dragStartPoint = null;
+    engineRef.current.dragOrigPoints = null;
+    setSelectedId(null);
+    redrawAll();
   }
   function selectDrawCategory() {
     switchTool('freehand');
@@ -508,6 +715,21 @@ export default function DrawScreen() {
   }
   function selectTextCategory() {
     switchTool('text');
+  }
+  function selectSelectCategory() {
+    switchTool('select');
+  }
+
+  function deleteSelected() {
+    const id = engineRef.current.selectedId;
+    if (!id) return;
+    const list = engineRef.current.strokes[side];
+    const idx = list.findIndex((o) => o.id === id);
+    if (idx !== -1) list.splice(idx, 1);
+    engineRef.current.selectedId = null;
+    setSelectedId(null);
+    socket.emit('draw:object-delete', { id });
+    redrawAll();
   }
 
   function commitText() {
@@ -680,7 +902,18 @@ export default function DrawScreen() {
           <Tooltip text="Eraser">
             <button type="button" className={`draw-tool${activeCategory === 'eraser' ? ' active' : ''}`} onClick={selectEraserCategory}>🧹</button>
           </Tooltip>
+          <Tooltip text="Select">
+            <button type="button" className={`draw-tool${activeCategory === 'select' ? ' active' : ''}`} onClick={selectSelectCategory}>🖱️</button>
+          </Tooltip>
         </div>
+
+        {activeCategory === 'select' && (
+          <div className="draw-toolbar-row">
+            <Tooltip text={selectedId ? 'Delete selected object' : 'Tap an object on your half to select it'}>
+              <button type="button" className="draw-tool" disabled={!selectedId} onClick={deleteSelected}>❌</button>
+            </Tooltip>
+          </div>
+        )}
 
         {activeCategory === 'shapes' && (
           <div className="draw-toolbar-row">
