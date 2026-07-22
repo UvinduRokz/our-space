@@ -63,12 +63,16 @@ export default function DrawScreen() {
   const [colorPopoverOpen, setColorPopoverOpen] = useState(false);
   const [sizePopoverOpen, setSizePopoverOpen] = useState(false);
   const [dashPopoverOpen, setDashPopoverOpen] = useState(false);
+  const [fontSize, setFontSize] = useState(24);
+  const [fontSizePopoverOpen, setFontSizePopoverOpen] = useState(false);
+  const [textEditing, setTextEditing] = useState(null); // { x, y (fractional canvas point), value } while placing a text object
   const [gridVisible, setGridVisible] = useState(false);
   const [status, setStatus] = useState({ text: '', show: false });
   const [reveal, setReveal] = useState(null); // saved drawing url, or null
   const statusTimerRef = useRef(null);
 
-  const activeCategory = activeTool === 'eraser' ? 'eraser' : SHAPE_TOOL_TYPES.includes(activeTool) ? 'shapes' : 'draw';
+  const activeCategory =
+    activeTool === 'eraser' ? 'eraser' : activeTool === 'text' ? 'text' : SHAPE_TOOL_TYPES.includes(activeTool) ? 'shapes' : 'draw';
 
   useEffect(() => {
     toolRef.current = {
@@ -200,6 +204,10 @@ export default function DrawScreen() {
       ctx.ellipse(cx, cy, Math.max(rx, 0.5), Math.max(ry, 0.5), 0, 0, Math.PI * 2);
       if (obj.filled) ctx.fill();
       else ctx.stroke();
+    } else if (obj.type === 'text') {
+      ctx.font = `${obj.fontSize || 24}px sans-serif`;
+      ctx.textBaseline = 'top';
+      ctx.fillText(obj.text || '', a.x, a.y);
     }
     resetDrawState(ctx);
   }
@@ -295,6 +303,18 @@ export default function DrawScreen() {
       if (!onOwnHalf) return;
       const cp = clampFrac(p);
       const { tool, color, width, dash, filled: isFilled, brushType: brush, gradient, color2 } = toolRef.current;
+
+      if (tool === 'text') {
+        // No pointer capture here (nothing to drag-track) and prevent the
+        // default action — without it, the canvas (not focusable) still
+        // "wins" the click and the browser resets focus to <body> right
+        // after the floating input autofocuses, blurring it instantly and
+        // discarding the text box before the user can type anything.
+        e.preventDefault();
+        setTextEditing({ x: cp.x, y: cp.y, value: '' });
+        return;
+      }
+
       canvas.setPointerCapture(e.pointerId);
 
       if (tool === 'freehand' || tool === 'eraser') {
@@ -470,6 +490,8 @@ export default function DrawScreen() {
     setColorPopoverOpen(false);
     setSizePopoverOpen(false);
     setDashPopoverOpen(false);
+    setFontSizePopoverOpen(false);
+    commitText();
   }
   function selectDrawCategory() {
     switchTool('freehand');
@@ -483,6 +505,27 @@ export default function DrawScreen() {
   }
   function selectEraserCategory() {
     switchTool('eraser');
+  }
+  function selectTextCategory() {
+    switchTool('text');
+  }
+
+  function commitText() {
+    setTextEditing((editing) => {
+      if (!editing) return null;
+      const value = editing.value.trim();
+      if (value) {
+        const id = crypto.randomUUID();
+        const obj = { id, type: 'text', color: currentColor, fontSize, points: [{ x: editing.x, y: editing.y }], text: value };
+        engineRef.current.strokes[side].push(obj);
+        socket.emit('draw:shape-commit', { id, type: 'text', color: currentColor, fontSize, points: [{ x: editing.x, y: editing.y }], text: value });
+        redrawAll();
+      }
+      return null;
+    });
+  }
+  function cancelText() {
+    setTextEditing(null);
   }
 
   function selectSwatch(color) {
@@ -500,12 +543,14 @@ export default function DrawScreen() {
     setColorSlot(slot);
     setSizePopoverOpen(false);
     setDashPopoverOpen(false);
+    setFontSizePopoverOpen(false);
     setColorPopoverOpen(true);
   }
 
   function toggleColorPopover() {
     setSizePopoverOpen(false);
     setDashPopoverOpen(false);
+    setFontSizePopoverOpen(false);
     setColorSlot('primary');
     setColorPopoverOpen((v) => !v);
   }
@@ -513,13 +558,22 @@ export default function DrawScreen() {
   function toggleSizePopover() {
     setColorPopoverOpen(false);
     setDashPopoverOpen(false);
+    setFontSizePopoverOpen(false);
     setSizePopoverOpen((v) => !v);
   }
 
   function toggleDashPopover() {
     setColorPopoverOpen(false);
     setSizePopoverOpen(false);
+    setFontSizePopoverOpen(false);
     setDashPopoverOpen((v) => !v);
+  }
+
+  function toggleFontSizePopover() {
+    setColorPopoverOpen(false);
+    setSizePopoverOpen(false);
+    setDashPopoverOpen(false);
+    setFontSizePopoverOpen((v) => !v);
   }
 
   async function handleFinish() {
@@ -563,6 +617,31 @@ export default function DrawScreen() {
             <span className="draw-tag draw-tag-left">💙</span>
             <span className="draw-tag draw-tag-right">💗</span>
           </div>
+          {textEditing && (
+            <input
+              type="text"
+              className="draw-text-input"
+              autoFocus
+              value={textEditing.value}
+              style={{
+                left: textEditing.x * stageSize.width,
+                top: textEditing.y * stageSize.height,
+                fontSize: `${fontSize}px`,
+                color: currentColor,
+              }}
+              onChange={(e) => setTextEditing((t) => (t ? { ...t, value: e.target.value } : t))}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault();
+                  commitText();
+                } else if (e.key === 'Escape') {
+                  e.preventDefault();
+                  cancelText();
+                }
+              }}
+              onBlur={commitText}
+            />
+          )}
         </div>
       </div>
 
@@ -594,6 +673,9 @@ export default function DrawScreen() {
           </Tooltip>
           <Tooltip text="Shapes">
             <button type="button" className={`draw-tool${activeCategory === 'shapes' ? ' active' : ''}`} onClick={selectShapesCategory}>📐</button>
+          </Tooltip>
+          <Tooltip text="Text">
+            <button type="button" className={`draw-tool${activeCategory === 'text' ? ' active' : ''}`} onClick={selectTextCategory}>🔤</button>
           </Tooltip>
           <Tooltip text="Eraser">
             <button type="button" className={`draw-tool${activeCategory === 'eraser' ? ' active' : ''}`} onClick={selectEraserCategory}>🧹</button>
@@ -660,6 +742,17 @@ export default function DrawScreen() {
           </div>
         )}
 
+        {activeCategory === 'text' && (
+          <div className="draw-toolbar-row">
+            <Tooltip text="Text color">
+              <button type="button" className="draw-tool draw-color-preview" style={{ background: currentColor }} onClick={() => openColorPopoverFor('primary')} />
+            </Tooltip>
+            <Tooltip text="Font size">
+              <button type="button" className="draw-tool" onClick={toggleFontSizePopover}>🔠</button>
+            </Tooltip>
+          </div>
+        )}
+
         {activeCategory === 'eraser' && (
           <div className="draw-toolbar-row">
             <Tooltip text="Eraser size">
@@ -668,7 +761,7 @@ export default function DrawScreen() {
           </div>
         )}
 
-        {colorPopoverOpen && (activeCategory === 'draw' || activeCategory === 'shapes') && (
+        {colorPopoverOpen && (activeCategory === 'draw' || activeCategory === 'shapes' || activeCategory === 'text') && (
           <div className="draw-popover draw-popover-palette">
             <div className="draw-color-swatches">
               {PALETTE.map((color) => (
@@ -694,6 +787,13 @@ export default function DrawScreen() {
           <div className="draw-popover">
             <input type="range" min="2" max="24" value={currentWidth} onChange={(e) => setCurrentWidth(Number(e.target.value))} />
             <span className="draw-size-value">{currentWidth}px</span>
+          </div>
+        )}
+
+        {fontSizePopoverOpen && (
+          <div className="draw-popover">
+            <input type="range" min="10" max="72" value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} />
+            <span className="draw-size-value">{fontSize}px</span>
           </div>
         )}
 

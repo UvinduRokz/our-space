@@ -68,6 +68,18 @@
   right: 16px;
 }
 
+.draw-text-input {
+  position: absolute;
+  z-index: 10;
+  background: rgba(255, 255, 255, 0.15);
+  border: 1px dashed rgba(0, 0, 0, 0.5);
+  padding: 2px 4px;
+  outline: none;
+  font-family: sans-serif;
+  min-width: 60px;
+  line-height: 1.1;
+}
+
 .draw-status {
   position: absolute;
   top: max(16px, env(safe-area-inset-top));
