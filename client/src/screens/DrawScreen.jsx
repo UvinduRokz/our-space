@@ -47,21 +47,10 @@ function floodFillAt(ctx, canvas, side, fracPoint, fillColorHex, tolerance = 32)
   const imgData = ctx.getImageData(0, 0, w, h);
   const data = imgData.data;
   const fill = hexToRgba(fillColorHex);
+  const pIdx = (x, y) => (y * w + x) * 4;
 
-  function idx(x, y) {
-    return (y * w + x) * 4;
-  }
-  function matches(i) {
-    return (
-      Math.abs(data[i] - target[0]) <= tolerance &&
-      Math.abs(data[i + 1] - target[1]) <= tolerance &&
-      Math.abs(data[i + 2] - target[2]) <= tolerance &&
-      Math.abs(data[i + 3] - target[3]) <= tolerance
-    );
-  }
-
-  const startIdx = idx(px, py);
-  const target = [data[startIdx], data[startIdx + 1], data[startIdx + 2], data[startIdx + 3]];
+  const startI = pIdx(px, py);
+  const target = [data[startI], data[startI + 1], data[startI + 2], data[startI + 3]];
   if (
     Math.abs(target[0] - fill[0]) <= 1 &&
     Math.abs(target[1] - fill[1]) <= 1 &&
@@ -70,26 +59,66 @@ function floodFillAt(ctx, canvas, side, fracPoint, fillColorHex, tolerance = 32)
   ) {
     return; // already this color, nothing to do
   }
-
-  const minX = side === 'blue' ? 0 : Math.ceil(w / 2);
-  const maxX = side === 'blue' ? Math.floor(w / 2) : w - 1;
-  const visited = new Uint8Array(w * h);
-  const stack = [[px, py]];
-
-  while (stack.length) {
-    const [x, y] = stack.pop();
-    if (x < minX || x > maxX || y < 0 || y >= h) continue;
-    const vIdx = y * w + x;
-    if (visited[vIdx]) continue;
-    const i = idx(x, y);
-    if (!matches(i)) continue;
-    visited[vIdx] = 1;
+  const matches = (x, y) => {
+    const i = pIdx(x, y);
+    return (
+      Math.abs(data[i] - target[0]) <= tolerance &&
+      Math.abs(data[i + 1] - target[1]) <= tolerance &&
+      Math.abs(data[i + 2] - target[2]) <= tolerance &&
+      Math.abs(data[i + 3] - target[3]) <= tolerance
+    );
+  };
+  const paint = (x, y) => {
+    const i = pIdx(x, y);
     data[i] = fill[0];
     data[i + 1] = fill[1];
     data[i + 2] = fill[2];
     data[i + 3] = fill[3];
-    stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+  };
+
+  const minX = side === 'blue' ? 0 : Math.ceil(w / 2);
+  const maxX = side === 'blue' ? Math.floor(w / 2) : w - 1;
+
+  // Scanline flood fill: fills a whole contiguous horizontal run per step
+  // and queues one seed per newly-found run on the row above/below it,
+  // instead of one queue entry per individual pixel. A naive per-pixel
+  // stack (the previous implementation) balloons into millions of tiny
+  // array allocations on any sizable fill area — confirmed to OOM-crash
+  // mobile Chrome on a real device.
+  const visited = new Uint8Array(w * h);
+  const seedX = [px];
+  const seedY = [py];
+
+  while (seedX.length) {
+    const sx = seedX.pop();
+    const sy = seedY.pop();
+    if (visited[sy * w + sx] || !matches(sx, sy)) continue;
+
+    let xL = sx;
+    while (xL > minX && !visited[sy * w + xL - 1] && matches(xL - 1, sy)) xL--;
+    let xR = sx;
+    while (xR < maxX && !visited[sy * w + xR + 1] && matches(xR + 1, sy)) xR++;
+
+    for (let x = xL; x <= xR; x++) {
+      visited[sy * w + x] = 1;
+      paint(x, sy);
+    }
+
+    for (const ny of [sy - 1, sy + 1]) {
+      if (ny < 0 || ny >= h) continue;
+      let x = xL;
+      while (x <= xR) {
+        if (!visited[ny * w + x] && matches(x, ny)) {
+          seedX.push(x);
+          seedY.push(ny);
+          while (x <= xR && !visited[ny * w + x] && matches(x, ny)) x++;
+        } else {
+          x++;
+        }
+      }
+    }
   }
+
   ctx.putImageData(imgData, 0, 0);
 }
 
