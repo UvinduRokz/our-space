@@ -21,11 +21,19 @@
 }
 @media (min-width: 900px) {
   .draw-stage-frame {
-    /* Desktop: room for the toolbar rail + its options panel on the left
-       (16px offset + ~150px rail + 8px gap + up to 400px panel, plus a
-       little buffer), and just the utilities row at the bottom (it still
-       sits bottom-center on desktop, not folded into the left rail). */
-    left: 600px;
+    /* Desktop: room for just the collapsed tab rail (measured ~152px wide)
+       + a little buffer, and the bottom utilities row. The panel starts
+       collapsed and stays that way until a category tab is tapped — it's
+       only reserving for the STEADY-STATE footprint here, not the widest
+       possible expanded panel (that was the previous, much larger 480px
+       reservation), so the canvas properly centers in almost all of the
+       remaining space instead of leaving a big dead gap between the rail
+       and a canvas sized for a much bigger reservation than actually
+       needed most of the time. When a panel IS open, it can transiently
+       overlap the canvas's left edge — an accepted trade-off, same as
+       mobile's: you're choosing options right then, not also drawing at
+       that exact spot. */
+    left: 170px;
     bottom: 90px;
   }
 }
@@ -81,7 +89,7 @@
   color: #fff;
 }
 .draw-tag-left {
-  left: 64px;
+  left: 16px;
 }
 .draw-tag-right {
   right: 16px;

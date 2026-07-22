@@ -751,6 +751,16 @@ io.on('connection', (socket) => {
     if (isOnline(otherSide)) io.to(otherSide).emit('draw:stroke-points', { side: socket.side, points: clamped });
   });
 
+  // Pure signal, no payload beyond side — lets the OTHER client know a
+  // freehand stroke is finished so it can do one settling redraw (fixes a
+  // gradient stroke looking patchy while points are still streaming in,
+  // since each arriving batch was colored against a gradient vector that
+  // kept changing as the stroke grew).
+  socket.on('draw:stroke-end', () => {
+    const otherSide = SIDES.find((s) => s !== socket.side);
+    if (isOnline(otherSide)) io.to(otherSide).emit('draw:stroke-end', { side: socket.side });
+  });
+
   socket.on('draw:undo', () => {
     const strokes = drawState[socket.side];
     if (!strokes.length) return;

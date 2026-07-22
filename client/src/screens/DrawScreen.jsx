@@ -442,6 +442,11 @@ export default function DrawScreen() {
   function computeStageSize() {
     const frame = stageFrameRef.current;
     if (!frame || !aspectRatio) return;
+    // The frame's own box (see DrawScreen.css) already excludes the rail's
+    // real footprint on desktop and the tab bar's on mobile, so the biggest
+    // box matching aspectRatio that fits inside frame.clientWidth/Height is
+    // both maximally large AND centered — no separate reservation needed
+    // here.
     const availW = frame.clientWidth;
     const availH = frame.clientHeight;
     let width = availW;
@@ -652,6 +657,17 @@ export default function DrawScreen() {
         eng.isDrawing = false;
         eng.lastLocalPoint = null;
         flushPending();
+        socket.emit('draw:stroke-end');
+        // A gradient stroke's color, while still being dragged, is recomputed
+        // segment-by-segment from the object's OWN growing points array —
+        // each new segment used whatever the array's current last point was
+        // at that instant, so earlier segments were already baked onto the
+        // canvas with a shorter/different gradient vector than later ones,
+        // producing a patchy result. Once the stroke is done, its points
+        // array is final, so a full redraw recolors every segment
+        // consistently against the SAME start/end vector (exactly what
+        // already happened incidentally whenever an undo forced a redraw).
+        redrawAll();
       } else if (SHAPE_TOOL_TYPES.includes(tool)) {
         if (!eng.shapePreview) return;
         const shape = eng.shapePreview;
@@ -717,6 +733,10 @@ export default function DrawScreen() {
         prev = p;
       });
     }
+    function onRemoteStrokeEnd({ side: fromSide }) {
+      if (fromSide === side) return;
+      redrawAll();
+    }
     function onShapeCommit({ side: fromSide, object }) {
       if (fromSide === side) return; // our own, already added locally on pointerup
       eng.strokes[fromSide].push(object);
@@ -772,6 +792,7 @@ export default function DrawScreen() {
     socket.on('draw:state', onRemoteState);
     socket.on('draw:stroke-start', onRemoteStart);
     socket.on('draw:stroke-points', onRemotePoints);
+    socket.on('draw:stroke-end', onRemoteStrokeEnd);
     socket.on('draw:shape-commit', onShapeCommit);
     socket.on('draw:object-move', onObjectMove);
     socket.on('draw:object-delete', onObjectDelete);
@@ -791,6 +812,7 @@ export default function DrawScreen() {
       socket.off('draw:aspect-ratio', onAspectRatio);
       socket.off('draw:stroke-start', onRemoteStart);
       socket.off('draw:stroke-points', onRemotePoints);
+      socket.off('draw:stroke-end', onRemoteStrokeEnd);
       socket.off('draw:shape-commit', onShapeCommit);
       socket.off('draw:object-move', onObjectMove);
       socket.off('draw:object-delete', onObjectDelete);
@@ -904,6 +926,34 @@ export default function DrawScreen() {
     exportCtx.fillStyle = '#fbfbfa';
     exportCtx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
     exportCtx.drawImage(canvas, 0, 0);
+
+    // The blue/pink heart badges that mark whose half is whose are separate
+    // DOM elements laid over the canvas (see .draw-tag in DrawScreen.css),
+    // not part of the canvas's own pixels — so the saved PNG lost them
+    // entirely. Redraw them here, in the same relative position/style, onto
+    // the export canvas so the saved image still shows whose side is whose.
+    const rect = canvas.getBoundingClientRect();
+    const dpr = rect.width ? canvas.width / rect.width : 1;
+    exportCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    const drawBadge = (text, x, align) => {
+      exportCtx.font = '16px "Segoe UI Emoji", sans-serif';
+      exportCtx.textBaseline = 'middle';
+      const paddingX = 10;
+      const w = exportCtx.measureText(text).width + paddingX * 2;
+      const h = 24;
+      const bx = align === 'right' ? x - w : x;
+      const by = 16;
+      exportCtx.fillStyle = 'rgba(20, 14, 36, 0.75)';
+      exportCtx.beginPath();
+      exportCtx.roundRect(bx, by, w, h, h / 2);
+      exportCtx.fill();
+      exportCtx.fillStyle = '#fff';
+      exportCtx.textAlign = 'left';
+      exportCtx.fillText(text, bx + paddingX, by + h / 2);
+    };
+    drawBadge('💙', 16, 'left');
+    drawBadge('💗', rect.width - 16, 'right');
+
     const dataUrl = exportCanvas.toDataURL('image/png');
     try {
       const saved = await apiPost('/api/drawings', { image: dataUrl });
