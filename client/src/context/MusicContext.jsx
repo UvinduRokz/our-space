@@ -28,7 +28,6 @@ export function expectedPosition(state) {
 export function MusicProvider({ children }) {
   const { socket, apiGet, name } = useApp();
   const audioRef = useRef(null);
-  const tracksRef = useRef([]);
   const [tracks, setTracks] = useState([]);
   const [playlists, setPlaylists] = useState([]);
   const [lastState, setLastState] = useState(null);
@@ -37,10 +36,6 @@ export function MusicProvider({ children }) {
     const saved = localStorage.getItem('music_volume');
     return saved !== null ? Number(saved) : 70;
   });
-
-  useEffect(() => {
-    tracksRef.current = tracks;
-  }, [tracks]);
 
   // mirrors lastState for the stable 'ended' listener below, which needs
   // the LATEST state at the moment playback naturally finishes, not
@@ -89,32 +84,12 @@ export function MusicProvider({ children }) {
     localStorage.setItem('music_volume', String(sliderValue));
   }
 
+  // Socket wiring: kept deliberately dumb — just captures state into React
+  // state. The actual audio.src/currentTime/play/pause work happens in the
+  // effect below instead of here, on purpose (see its comment).
   useEffect(() => {
     if (!socket) return;
     const audio = audioRef.current;
-
-    function applyState(state) {
-      setLastState(state);
-      const track = tracksRef.current.find((t) => t.id === state.trackId);
-
-      if (!track) {
-        audio.pause();
-        return;
-      }
-      if (!audio.src || !audio.src.endsWith(track.url)) {
-        audio.src = track.url;
-      }
-      const target = expectedPosition(state);
-      if (Math.abs((audio.currentTime || 0) - target) > 1) {
-        audio.currentTime = Math.max(0, target);
-      }
-      if (state.isPlaying) {
-        const p = audio.play();
-        if (p && p.catch) p.catch(() => setNeedsSyncTap(true));
-      } else {
-        audio.pause();
-      }
-    }
 
     function onTracks(t) {
       setTracks(t);
@@ -126,7 +101,7 @@ export function MusicProvider({ children }) {
       socket.emit('music:ended', { trackId: lastStateRef.current && lastStateRef.current.trackId });
     }
 
-    socket.on('music:state', applyState);
+    socket.on('music:state', setLastState);
     socket.on('music:tracks', onTracks);
     socket.on('music:playlists', onPlaylists);
     audio.addEventListener('ended', onEnded);
@@ -145,7 +120,7 @@ export function MusicProvider({ children }) {
     }, 8000);
 
     return () => {
-      socket.off('music:state', applyState);
+      socket.off('music:state', setLastState);
       socket.off('music:tracks', onTracks);
       socket.off('music:playlists', onPlaylists);
       audio.removeEventListener('ended', onEnded);
@@ -153,6 +128,40 @@ export function MusicProvider({ children }) {
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket]);
+
+  // Applies the current server state to the actual <audio> element.
+  // Deliberately a separate effect keyed on BOTH lastState and tracks —
+  // not folded into the socket handler above — because the initial
+  // music:sync response and the track-list fetch are two independent
+  // requests racing each other. If the socket response won that race (very
+  // possible on a real network), looking the track up inside a one-shot
+  // event handler would find nothing (tracks still []) and silently never
+  // set audio.src, with nothing to retry it later — that's what made
+  // "nothing plays by default, only switching tracks fixes it" happen.
+  // Depending on tracks here means this re-runs the moment the track list
+  // actually finishes loading, however that race went.
+  useEffect(() => {
+    const audio = audioRef.current;
+    if (!audio || !lastState) return;
+    const track = tracks.find((t) => t.id === lastState.trackId);
+    if (!track) {
+      audio.pause();
+      return;
+    }
+    if (!audio.src || !audio.src.endsWith(track.url)) {
+      audio.src = track.url;
+    }
+    const target = expectedPosition(lastState);
+    if (Math.abs((audio.currentTime || 0) - target) > 1) {
+      audio.currentTime = Math.max(0, target);
+    }
+    if (lastState.isPlaying) {
+      const p = audio.play();
+      if (p && p.catch) p.catch(() => setNeedsSyncTap(true));
+    } else {
+      audio.pause();
+    }
+  }, [lastState, tracks]);
 
   function retrySync() {
     setNeedsSyncTap(false);
