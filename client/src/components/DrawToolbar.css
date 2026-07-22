@@ -80,8 +80,14 @@
   }
 }
 
-/* Collapsed only matters on mobile — see the max-width:900px block below.
-   Desktop ignores this class entirely so the panel is always visible. */
+/* Collapsed by default everywhere (mobile and desktop alike) — a tab starts
+   with its panel hidden until tapped, tapping the active tab again hides it
+   again. overflow-x is set explicitly to hidden: leaving it unset while
+   overflow-y is auto makes browsers implicitly treat overflow-x as auto too
+   (per the CSS overflow spec), which was producing a horizontal scrollbar
+   any time a row's content was even a few px too wide for the old, overly
+   narrow max-width — the real fix is giving the panel enough room to
+   actually fit a row of controls, not just suppressing the scrollbar. */
 .draw-toolbar-panel {
   display: flex;
   flex-direction: column;
@@ -90,18 +96,18 @@
   border-radius: 16px;
   background: rgba(20, 14, 36, 0.9);
   backdrop-filter: blur(6px);
-  max-height: 42vh;
+  max-height: 60vh;
   overflow-y: auto;
-  max-width: min(80vw, 320px);
+  overflow-x: hidden;
+  max-width: min(90vw, 340px);
 }
-@media (max-width: 899px) {
-  .draw-toolbar-panel.collapsed {
-    display: none;
-  }
+.draw-toolbar-panel.collapsed {
+  display: none;
 }
 @media (min-width: 900px) {
   .draw-toolbar-panel {
-    max-width: 260px;
+    max-width: 400px;
+    max-height: 75vh;
   }
 }
 
@@ -122,6 +128,12 @@
   align-items: center;
   gap: 6px;
   flex-wrap: wrap;
+  max-width: 100%;
+}
+.draw-panel-controls input[type='range'] {
+  flex: 1;
+  min-width: 0;
+  max-width: 160px;
 }
 .draw-panel-hint {
   font-size: 0.75rem;

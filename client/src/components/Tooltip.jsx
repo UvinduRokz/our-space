@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import './Tooltip.css';
 
 const MARGIN = 8; // gap kept between the bubble and both the trigger and the viewport edge
@@ -72,14 +73,17 @@ export default function Tooltip({ text, children, position = 'top' }) {
       onBlur={() => setOpen(false)}
     >
       {children}
-      <span
-        className="tooltip-bubble"
-        role="tooltip"
-        ref={bubbleRef}
-        style={style ? { top: style.top, left: style.left } : undefined}
-      >
-        {text}
-      </span>
+      {createPortal(
+        <span
+          className="tooltip-bubble"
+          role="tooltip"
+          ref={bubbleRef}
+          style={{ ...(style ? { top: style.top, left: style.left } : null), opacity: open ? 1 : 0 }}
+        >
+          {text}
+        </span>,
+        document.body
+      )}
     </span>
   );
 }

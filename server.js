@@ -437,6 +437,12 @@ newHunt();
 let drawState = { blue: [], pink: [] };
 let drawRedoStack = { blue: [], pink: [] };
 const MAX_STROKES_PER_SIDE = 200;
+// Chosen once per drawing (whoever picks first locks it for both sides —
+// see draw:set-aspect-ratio) and reset back to null on draw:clear, so a
+// fresh drawing gets asked again. null means "not chosen yet."
+const ASPECT_PRESETS = { portrait: 9 / 16, square: 1, landscape: 16 / 9 };
+let drawAspectRatio = null;
+let drawAspectPreset = null;
 
 function clampDrawPoint(side, p) {
   const x = side === 'blue' ? Math.min(p.x, 0.5) : Math.max(p.x, 0.5);
@@ -690,6 +696,16 @@ io.on('connection', (socket) => {
 
   socket.on('draw:sync', () => {
     socket.emit('draw:state', drawState);
+    socket.emit('draw:aspect-ratio', { ratio: drawAspectRatio, preset: drawAspectPreset });
+  });
+
+  socket.on('draw:set-aspect-ratio', (data) => {
+    const preset = data && data.preset;
+    if (!Object.prototype.hasOwnProperty.call(ASPECT_PRESETS, preset)) return;
+    if (drawAspectRatio !== null) return; // already chosen for this drawing — first pick wins
+    drawAspectPreset = preset;
+    drawAspectRatio = ASPECT_PRESETS[preset];
+    io.emit('draw:aspect-ratio', { ratio: drawAspectRatio, preset: drawAspectPreset });
   });
 
   socket.on('draw:stroke-start', (data) => {
@@ -817,7 +833,10 @@ io.on('connection', (socket) => {
     if (hadStrokes) appendHistory('draw_cleared', socket.side, {});
     drawState = { blue: [], pink: [] };
     drawRedoStack = { blue: [], pink: [] };
+    drawAspectRatio = null; // a fresh drawing gets to choose its own aspect ratio again
+    drawAspectPreset = null;
     io.emit('draw:cleared');
+    io.emit('draw:aspect-ratio', { ratio: null, preset: null });
   });
 
   socket.on('music:sync', () => {

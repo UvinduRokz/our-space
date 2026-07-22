@@ -22,7 +22,13 @@ function distToSegment(p, a, b) {
 // drew a different shape (circle vs. ellipse) for each partner. Locking
 // both sides to one shared ratio and letterboxing it (see computeStageSize
 // below) keeps strokes shaped the same everywhere, no matter the device.
-const CANVAS_ASPECT = 9 / 16; // width / height — a tall "notebook page" that suits phones, pillarboxed on wide desktop screens
+// Which ratio is server-authoritative (see draw:set-aspect-ratio) — whoever
+// picks first locks it for both sides until the next draw:clear.
+const ASPECT_PRESETS = [
+  { id: 'portrait', ratio: 9 / 16, label: 'Portrait' },
+  { id: 'square', ratio: 1, label: 'Square' },
+  { id: 'landscape', ratio: 16 / 9, label: 'Landscape' },
+];
 
 export default function DrawScreen() {
   const { socket, side, profile, apiPost, partnerActivity } = useApp();
@@ -32,6 +38,10 @@ export default function DrawScreen() {
   const canvasRef = useRef(null);
   const ctxRef = useRef(null);
   const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
+  // null = not chosen yet for this drawing — shows the picker instead of
+  // the canvas. Server-authoritative (draw:aspect-ratio), so whichever side
+  // picks first is what both of you see, and it resets on draw:clear.
+  const [aspectRatio, setAspectRatio] = useState(null);
   // Mutable drawing engine state that must NOT trigger React re-renders on
   // every pointer move — canvas drawing stays imperative, same as the old
   // vanilla module's closure variables, just held in a ref instead.
@@ -346,20 +356,20 @@ export default function DrawScreen() {
     redrawAll();
   }
 
-  // Largest box matching CANVAS_ASPECT that still fits inside the available
+  // Largest box matching aspectRatio that still fits inside the available
   // screen space — the letterboxing/pillarboxing that keeps the canvas's
   // shape identical on both partners' devices regardless of their own
-  // screen's aspect ratio.
+  // screen's aspect ratio. No-op until a ratio has actually been chosen.
   function computeStageSize() {
     const frame = stageFrameRef.current;
-    if (!frame) return;
+    if (!frame || !aspectRatio) return;
     const availW = frame.clientWidth;
     const availH = frame.clientHeight;
     let width = availW;
-    let height = width / CANVAS_ASPECT;
+    let height = width / aspectRatio;
     if (height > availH) {
       height = availH;
-      width = height * CANVAS_ASPECT;
+      width = height * aspectRatio;
     }
     setStageSize({ width, height });
   }
@@ -368,7 +378,8 @@ export default function DrawScreen() {
     computeStageSize();
     window.addEventListener('resize', computeStageSize);
     return () => window.removeEventListener('resize', computeStageSize);
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aspectRatio]);
 
   useEffect(() => {
     function onKeyDown(e) {
@@ -571,6 +582,9 @@ export default function DrawScreen() {
       clearStaleSelection();
       redrawAll();
     }
+    function onAspectRatio({ ratio }) {
+      setAspectRatio(ratio);
+    }
     function onRemoteStart({ side: fromSide, id, point, color, width, dash, erase, brushType: brush, gradient, color2 }) {
       if (fromSide === side) return; // our own, already drawn locally
       const stroke = { id, type: 'freehand', color, width, dash, erase, brushType: brush, points: [point] };
@@ -649,6 +663,7 @@ export default function DrawScreen() {
     socket.on('draw:undo', onUndo);
     socket.on('draw:redo', onRedo);
     socket.on('draw:cleared', onCleared);
+    socket.on('draw:aspect-ratio', onAspectRatio);
 
     socket.emit('draw:sync');
 
@@ -658,6 +673,7 @@ export default function DrawScreen() {
       canvas.removeEventListener('pointerup', onPointerUp);
       canvas.removeEventListener('pointercancel', onPointerUp);
       socket.off('draw:state', onRemoteState);
+      socket.off('draw:aspect-ratio', onAspectRatio);
       socket.off('draw:stroke-start', onRemoteStart);
       socket.off('draw:stroke-points', onRemotePoints);
       socket.off('draw:shape-commit', onShapeCommit);
@@ -828,46 +844,70 @@ export default function DrawScreen() {
       <BackButton to="activities" />
       <p className={`draw-status${status.show ? ' show' : ''}`}>{status.text}</p>
 
-      <DrawToolbar
-        activeCategory={activeCategory}
-        activeTool={activeTool}
-        currentColor={currentColor}
-        secondColor={secondColor}
-        colorSlot={colorSlot}
-        colorPopoverOpen={colorPopoverOpen}
-        currentWidth={currentWidth}
-        currentDash={currentDash}
-        filled={filled}
-        brushType={brushType}
-        gradientOn={gradientOn}
-        fontSize={fontSize}
-        selectedId={selectedId}
-        gridVisible={gridVisible}
-        selectDrawCategory={selectDrawCategory}
-        selectShapesCategory={selectShapesCategory}
-        selectShapeType={selectShapeType}
-        selectEraserCategory={selectEraserCategory}
-        selectTextCategory={selectTextCategory}
-        selectSelectCategory={selectSelectCategory}
-        deleteSelected={deleteSelected}
-        selectSwatch={selectSwatch}
-        handleCustomColor={handleCustomColor}
-        openColorPopoverFor={openColorPopoverFor}
-        toggleColorPopover={toggleColorPopover}
-        setFilled={setFilled}
-        setGradientOn={setGradientOn}
-        setBrushType={setBrushType}
-        setCurrentDash={setCurrentDash}
-        setCurrentWidth={setCurrentWidth}
-        setFontSize={setFontSize}
-        setGridVisible={setGridVisible}
-        onUndo={() => socket.emit('draw:undo')}
-        onRedo={() => socket.emit('draw:redo')}
-        onClear={handleClear}
-        onFinish={handleFinish}
-      />
+      {aspectRatio && (
+        <DrawToolbar
+          activeCategory={activeCategory}
+          activeTool={activeTool}
+          currentColor={currentColor}
+          secondColor={secondColor}
+          colorSlot={colorSlot}
+          colorPopoverOpen={colorPopoverOpen}
+          currentWidth={currentWidth}
+          currentDash={currentDash}
+          filled={filled}
+          brushType={brushType}
+          gradientOn={gradientOn}
+          fontSize={fontSize}
+          selectedId={selectedId}
+          gridVisible={gridVisible}
+          selectDrawCategory={selectDrawCategory}
+          selectShapesCategory={selectShapesCategory}
+          selectShapeType={selectShapeType}
+          selectEraserCategory={selectEraserCategory}
+          selectTextCategory={selectTextCategory}
+          selectSelectCategory={selectSelectCategory}
+          deleteSelected={deleteSelected}
+          selectSwatch={selectSwatch}
+          handleCustomColor={handleCustomColor}
+          openColorPopoverFor={openColorPopoverFor}
+          toggleColorPopover={toggleColorPopover}
+          setFilled={setFilled}
+          setGradientOn={setGradientOn}
+          setBrushType={setBrushType}
+          setCurrentDash={setCurrentDash}
+          setCurrentWidth={setCurrentWidth}
+          setFontSize={setFontSize}
+          setGridVisible={setGridVisible}
+          onUndo={() => socket.emit('draw:undo')}
+          onRedo={() => socket.emit('draw:redo')}
+          onClear={handleClear}
+          onFinish={handleFinish}
+        />
+      )}
 
-      {!partnerHere && (
+      {!aspectRatio && (
+        <div className="draw-aspect-overlay">
+          <div className="draw-aspect-picker">
+            <h2>Choose a canvas shape</h2>
+            <p>Whoever picks first sets it for both of you — it stays fixed until you clear the drawing.</p>
+            <div className="draw-aspect-options">
+              {ASPECT_PRESETS.map((p) => (
+                <button
+                  type="button"
+                  key={p.id}
+                  className="draw-aspect-option"
+                  onClick={() => socket.emit('draw:set-aspect-ratio', { preset: p.id })}
+                >
+                  <span className="draw-aspect-preview" style={{ width: `${70 * p.ratio}px`, height: '70px' }} />
+                  <span>{p.label}</span>
+                </button>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {!partnerHere && aspectRatio && (
         <div className="waiting-overlay">
           <p>waiting for {profile.partnerNickname} to open this page before you can draw together…</p>
         </div>

@@ -34,7 +34,9 @@ const SCREEN_TO_ACTIVITY = {
 export default function PartnerLocationPill() {
   const { currentScreen, partnerActivity, partnerOnline, profile } = useApp();
 
-  if (!partnerOnline || currentScreen === 'gate') return null;
+  // Hidden on the Draw screen specifically — it overlaps the canvas/toolbar
+  // area, and Draw already shows its own "waiting for partner" state.
+  if (!partnerOnline || currentScreen === 'gate' || currentScreen === 'game-draw') return null;
 
   const myActivity = SCREEN_TO_ACTIVITY[currentScreen];
   const togetherHere = !!myActivity && myActivity === partnerActivity;

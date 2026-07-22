@@ -6,7 +6,14 @@
 .tooltip-bubble {
   /* positioned in JS via getBoundingClientRect (see Tooltip.jsx) so it can
      flip and clamp against the viewport — top/left below are just an
-     off-screen parking spot used before the first measurement runs */
+     off-screen parking spot used before the first measurement runs.
+     Portaled to document.body (see Tooltip.jsx) so it always positions
+     relative to the real viewport — otherwise any transformed ancestor
+     (the toolbar uses translate() for centering) becomes the containing
+     block for position:fixed descendants, breaking the coordinates below.
+     Opacity is JS-driven (the `open` state) rather than a CSS :hover
+     selector, since the portal moves the bubble out of .tooltip-wrapper's
+     DOM subtree entirely. */
   position: fixed;
   top: -9999px;
   left: -9999px;
@@ -19,14 +26,8 @@
   font-size: 0.72rem;
   font-weight: 400;
   white-space: nowrap;
-  opacity: 0;
   pointer-events: none;
   transition: opacity 0.15s ease;
-}
-
-.tooltip-wrapper:hover .tooltip-bubble,
-.tooltip-wrapper:focus-within .tooltip-bubble {
-  opacity: 1;
 }
 
 /* touch devices have no real hover — showing tooltips there just adds a

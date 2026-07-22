@@ -177,12 +177,23 @@ export function MusicProvider({ children }) {
       audio.currentTime = Math.max(0, target);
     }
     if (lastState.isPlaying) {
-      const p = audio.play();
-      if (p && p.catch) p.catch(() => setNeedsSyncTap(true));
+      // Only actually call play() if it isn't already playing — this effect
+      // re-runs on every lastState update (drift correction every 8s, any
+      // position/seek broadcast, etc.), and re-issuing play() on an
+      // already-playing element can still spuriously reject in some
+      // browsers with no real playback problem, which was popping the
+      // "tap to sync" prompt far more often than genuine autoplay blocks
+      // warranted.
+      if (audio.paused) {
+        const p = audio.play();
+        if (p && p.catch) p.catch(() => setNeedsSyncTap(true));
+      } else if (needsSyncTap) {
+        setNeedsSyncTap(false); // it's audibly playing fine now, stop nagging
+      }
     } else {
       audio.pause();
     }
-  }, [lastState, tracks]);
+  }, [lastState, tracks, needsSyncTap]);
 
   function retrySync() {
     setNeedsSyncTap(false);
