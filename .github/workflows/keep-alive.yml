@@ -1,0 +1,16 @@
+name: Keep Render instance awake
+
+# Render's free tier spins the app down after ~15 min idle, and the request
+# that wakes it back up often fails or times out while it's rebooting.
+# Pinging it well under that window keeps it always warm for both of you.
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  ping:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Ping the app
+        run: curl -sf --max-time 60 https://our-space-bio3.onrender.com/ || true
