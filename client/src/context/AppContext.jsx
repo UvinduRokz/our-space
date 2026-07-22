@@ -5,6 +5,22 @@ const AppContext = createContext(null);
 
 const DEFAULT_PROFILE = { partnerNickname: 'babe', bear: 'tenderheart-bear' };
 
+// Maps a screen id to the activity key broadcast to your partner (and used
+// to decide whether the partner-location pill should say "you're both
+// here"). Screens not listed here don't exist yet (added as later phases
+// port them) — navigateTo() just skips the broadcast for those.
+const SCREEN_TO_ACTIVITY = {
+  main: 'idle',
+  activities: 'activities',
+  'game-wordle': 'wordle',
+  'game-hunt': 'hunt',
+  'game-draw': 'draw',
+  profile: 'profile',
+  history: 'history',
+  gallery: 'gallery',
+  music: 'music',
+};
+
 async function apiPost(path, body, name) {
   const res = await fetch(path, {
     method: 'POST',
@@ -30,8 +46,9 @@ export function AppProvider({ children }) {
   const [authStatus, setAuthStatus] = useState('checking'); // 'checking' | 'authenticated' | 'unauthenticated'
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
   const [partnerActivity, setPartnerActivity] = useState('idle');
-  const [partnerOnline, setPartnerOnline] = useState(false);
+  const [partnerOnline, setPartnerOnline] = useState(null); // null = no presence event received yet
   const [socket, setSocket] = useState(null);
+  const [currentScreen, setCurrentScreen] = useState('main');
 
   useEffect(() => {
     let cancelled = false;
@@ -94,6 +111,25 @@ export function AppProvider({ children }) {
     };
   }, [authStatus, name, side]);
 
+  // The custom bear cursor: driven by CSS custom properties on the root
+  // element so any screen can just `cursor: var(--cursor-idle)` without
+  // needing to know which bear is selected.
+  useEffect(() => {
+    const bear = profile.bear || 'tenderheart-bear';
+    document.documentElement.style.setProperty('--cursor-idle', `url('/cursors/${bear}-idle.svg') 8 9, auto`);
+    document.documentElement.style.setProperty('--cursor-wave', `url('/cursors/${bear}-hover.svg') 8 9, auto`);
+  }, [profile.bear]);
+
+  const navigateTo = useCallback(
+    (screenId) => {
+      setCurrentScreen(screenId);
+      if (socket && SCREEN_TO_ACTIVITY[screenId]) {
+        socket.emit('activity:update', { activity: SCREEN_TO_ACTIVITY[screenId] });
+      }
+    },
+    [socket]
+  );
+
   const value = {
     name,
     side,
@@ -104,6 +140,8 @@ export function AppProvider({ children }) {
     partnerOnline,
     socket,
     login,
+    currentScreen,
+    navigateTo,
     apiGet: (path) => apiGet(path, name),
     apiPost: (path, body) => apiPost(path, body, name),
   };

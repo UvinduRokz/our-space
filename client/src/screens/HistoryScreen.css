@@ -1,0 +1,65 @@
+.recap-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 10px;
+  width: 100%;
+  max-width: 340px;
+  margin: 16px 0;
+}
+.recap-tile {
+  padding: 14px;
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  text-align: center;
+}
+.recap-tile .recap-value {
+  display: block;
+  font-size: 1.5rem;
+  font-weight: 700;
+}
+.recap-tile .recap-label {
+  display: block;
+  font-size: 0.7rem;
+  opacity: 0.75;
+  margin-top: 2px;
+}
+
+.history-list {
+  list-style: none;
+  padding: 0;
+  margin: 8px 0 24px;
+  width: 100%;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.history-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 10px 14px;
+  border-radius: 12px;
+  background: rgba(255, 255, 255, 0.06);
+  border-left: 3px solid transparent;
+  font-size: 0.85rem;
+  text-align: left;
+}
+.history-list li.side-blue {
+  border-left-color: var(--blue);
+}
+.history-list li.side-pink {
+  border-left-color: var(--pink);
+}
+.history-time {
+  margin-left: auto;
+  font-size: 0.7rem;
+  opacity: 0.55;
+  white-space: nowrap;
+}
+.history-empty {
+  opacity: 0.6;
+  font-size: 0.85rem;
+  margin-top: 20px;
+}

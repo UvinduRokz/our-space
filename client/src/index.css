@@ -4,6 +4,9 @@
   --bg-blue: #1c1440;
   --bg-pink: #400f2e;
   color-scheme: dark;
+  /* overridden per-frame by useCursor() based on the saved bear avatar */
+  --cursor-idle: auto;
+  --cursor-wave: auto;
 }
 
 * {
@@ -36,6 +39,26 @@ body {
   justify-content: center;
   text-align: center;
   padding: 24px;
+  cursor: var(--cursor-idle);
+}
+.screen button:hover,
+.screen a:hover,
+.screen input:hover {
+  cursor: var(--cursor-wave);
+}
+
+/* Screens whose content can outgrow the viewport (anything with a list,
+   grid, or form) need to scroll. Plain `justify-content: center` makes
+   padding-top an unreliable top offset once content overflows — the whole
+   block centers as a unit instead, which is what caused a persistent
+   overlay to overlap headings on short viewports in the old app. `safe
+   center` keeps the nice centered look when content fits, but falls back
+   to top-aligned + scrollable the moment it doesn't. */
+.screen--scrollable {
+  overflow-y: auto;
+  padding-top: 112px;
+  padding-bottom: 32px;
+  justify-content: safe center;
 }
 
 h1 {

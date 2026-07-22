@@ -1,0 +1,47 @@
+.framed-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  padding: 24px;
+}
+.framed-modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(10, 8, 20, 0.85);
+  backdrop-filter: blur(6px);
+}
+.framed-modal-frame {
+  position: relative;
+  padding: 14px;
+  background: #fffaf0;
+  border-radius: 6px;
+  box-shadow: 0 30px 60px rgba(0, 0, 0, 0.5);
+  animation: frameReveal 0.45s cubic-bezier(0.2, 0.9, 0.3, 1.2);
+  max-width: min(85vw, 420px);
+}
+.framed-modal-frame img {
+  display: block;
+  max-width: 100%;
+  max-height: 60vh;
+  border-radius: 2px;
+}
+@keyframes frameReveal {
+  0% { transform: scale(0.75) rotate(-3deg); opacity: 0; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+.framed-modal-close,
+.framed-modal-download {
+  position: relative;
+  z-index: 1;
+  padding: 10px 20px;
+}
+.framed-modal-download {
+  background: rgba(255, 255, 255, 0.15);
+  text-decoration: none;
+  color: #fff;
+}
