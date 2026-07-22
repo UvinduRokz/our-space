@@ -5,7 +5,15 @@ import Modal from '../components/Modal.jsx';
 import Tooltip from '../components/Tooltip.jsx';
 import './DrawScreen.css';
 
-const SWATCHES = ['#1a1a1a', '#ffffff', '#e74c3c', '#f39c12', '#f1c40f', '#2ecc71', '#1abc9c', '#4f8fff', '#ff5fa8', '#9b59b6'];
+// A Paint-style 20-swatch palette (two rows of 10) for quick access, instead
+// of just a handful of swatches plus a native color picker as the only options.
+const PALETTE = [
+  '#000000', '#7f7f7f', '#880015', '#ed1c24', '#ff7f27', '#fff200', '#22b14c', '#00a2e8', '#3f48cc', '#a349a4',
+  '#ffffff', '#c3c3c3', '#b97a57', '#ffaec9', '#ffc90e', '#efe4b0', '#b5e61d', '#99d9ea', '#7092be', '#c8bfe7',
+];
+const SHAPE_TOOL_TYPES = ['line', 'rect', 'ellipse', 'arrow'];
+const DASH_STYLES = ['solid', 'dashed', 'dotted'];
+const BRUSH_TYPES = ['pencil', 'brush', 'marker'];
 
 // Fixed on purpose: the canvas used to just stretch to fill whichever
 // device's screen it was on, so the same fractional stroke coordinates
@@ -32,24 +40,42 @@ export default function DrawScreen() {
     pendingPoints: [],
     rafScheduled: false,
     strokes: { blue: [], pink: [] },
+    shapeStart: null, // fractional {x,y} where a shape drag began
+    shapePreview: null, // in-progress shape object, local-only until pointerup commits it
   });
   // latest tool settings, readable from the stable (attached-once) pointer
   // handlers without needing to re-bind listeners whenever a tool changes
-  const toolRef = useRef({ color: '#1a1a1a', width: 4, erasing: false });
+  const toolRef = useRef({
+    tool: 'freehand', color: '#1a1a1a', width: 4, dash: 'solid', filled: false,
+    brushType: 'pencil', gradient: false, color2: '#ffffff',
+  });
 
+  const [activeTool, setActiveTool] = useState('freehand'); // 'freehand' | 'eraser' | 'line' | 'rect' | 'ellipse' | 'arrow'
+  const [lastShapeType, setLastShapeType] = useState('line');
   const [currentColor, setCurrentColor] = useState('#1a1a1a');
+  const [secondColor, setSecondColor] = useState('#ffffff');
   const [currentWidth, setCurrentWidth] = useState(4);
-  const [isErasing, setIsErasing] = useState(false);
+  const [currentDash, setCurrentDash] = useState('solid');
+  const [filled, setFilled] = useState(false);
+  const [brushType, setBrushType] = useState('pencil');
+  const [gradientOn, setGradientOn] = useState(false);
+  const [colorSlot, setColorSlot] = useState('primary'); // which swatch the color popover is currently editing
   const [colorPopoverOpen, setColorPopoverOpen] = useState(false);
   const [sizePopoverOpen, setSizePopoverOpen] = useState(false);
+  const [dashPopoverOpen, setDashPopoverOpen] = useState(false);
   const [gridVisible, setGridVisible] = useState(false);
   const [status, setStatus] = useState({ text: '', show: false });
   const [reveal, setReveal] = useState(null); // saved drawing url, or null
   const statusTimerRef = useRef(null);
 
+  const activeCategory = activeTool === 'eraser' ? 'eraser' : SHAPE_TOOL_TYPES.includes(activeTool) ? 'shapes' : 'draw';
+
   useEffect(() => {
-    toolRef.current = { color: currentColor, width: currentWidth, erasing: isErasing };
-  }, [currentColor, currentWidth, isErasing]);
+    toolRef.current = {
+      tool: activeTool, color: currentColor, width: currentWidth, dash: currentDash, filled,
+      brushType, gradient: gradientOn, color2: secondColor,
+    };
+  }, [activeTool, currentColor, currentWidth, currentDash, filled, brushType, gradientOn, secondColor]);
 
   function showDrawStatus(message) {
     setStatus({ text: message, show: true });
@@ -67,20 +93,115 @@ export default function DrawScreen() {
     return { x, y: Math.min(Math.max(p.y, 0), 1) };
   }
 
+  // Shared stroke styling (color/gradient/width/dash/brush texture) for both
+  // freehand segments and shapes — dash patterns scale with the stroke
+  // width so thin and thick lines both read clearly as dashed/dotted.
+  // `rect` (the canvas's CSS-pixel box) is needed to convert the object's
+  // fractional endpoints into the pixel-space coordinates a canvas gradient
+  // requires; freehand strokes use their first/last point as the gradient
+  // vector, which naturally tracks the growing stroke while it's still
+  // being drawn and settles once it's complete.
+  function applyLineStyle(ctx, obj, rect) {
+    const color1 = obj.color || '#000000';
+    let styleColor = color1;
+    if (obj.gradient && obj.color2 && rect && obj.points && obj.points.length >= 2) {
+      const p0 = obj.points[0];
+      const p1 = obj.points[obj.points.length - 1];
+      const grad = ctx.createLinearGradient(p0.x * rect.width, p0.y * rect.height, p1.x * rect.width, p1.y * rect.height);
+      grad.addColorStop(0, color1);
+      grad.addColorStop(1, obj.color2);
+      styleColor = grad;
+    }
+    ctx.strokeStyle = styleColor;
+    ctx.fillStyle = styleColor;
+    ctx.lineWidth = obj.width || 4;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    if (obj.dash === 'dashed') ctx.setLineDash([(obj.width || 4) * 2.5, (obj.width || 4) * 1.5]);
+    else if (obj.dash === 'dotted') ctx.setLineDash([(obj.width || 4) * 0.6, (obj.width || 4) * 1.4]);
+    else ctx.setLineDash([]);
+    if (obj.brushType === 'brush') {
+      ctx.shadowBlur = (obj.width || 4) * 1.2;
+      ctx.shadowColor = color1;
+    } else {
+      ctx.shadowBlur = 0;
+    }
+    ctx.globalAlpha = obj.brushType === 'marker' ? 0.55 : 1;
+  }
+
+  function resetDrawState(ctx) {
+    ctx.setLineDash([]);
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 1;
+  }
+
   function drawSegment(stroke, from, to) {
     const canvas = canvasRef.current;
     const ctx = ctxRef.current;
     const rect = canvas.getBoundingClientRect();
     ctx.globalCompositeOperation = stroke.erase ? 'destination-out' : 'source-over';
-    ctx.strokeStyle = stroke.color || '#000000';
-    ctx.lineWidth = stroke.width || 4;
-    ctx.lineCap = 'round';
-    ctx.lineJoin = 'round';
+    applyLineStyle(ctx, stroke, rect);
     ctx.beginPath();
     ctx.moveTo(from.x * rect.width, from.y * rect.height);
     ctx.lineTo(to.x * rect.width, to.y * rect.height);
     ctx.stroke();
     ctx.globalCompositeOperation = 'source-over';
+    resetDrawState(ctx);
+  }
+
+  function drawArrowHead(ctx, from, to, width) {
+    const angle = Math.atan2(to.y - from.y, to.x - from.x);
+    const headLen = Math.max(10, width * 2.5);
+    ctx.save();
+    ctx.setLineDash([]);
+    ctx.beginPath();
+    ctx.moveTo(to.x, to.y);
+    ctx.lineTo(to.x - headLen * Math.cos(angle - Math.PI / 6), to.y - headLen * Math.sin(angle - Math.PI / 6));
+    ctx.lineTo(to.x - headLen * Math.cos(angle + Math.PI / 6), to.y - headLen * Math.sin(angle + Math.PI / 6));
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawShape(obj) {
+    const canvas = canvasRef.current;
+    const ctx = ctxRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const toPx = (p) => ({ x: p.x * rect.width, y: p.y * rect.height });
+    const [p1, rawP2] = obj.points;
+    const a = toPx(p1);
+    const b = toPx(rawP2 || p1);
+    applyLineStyle(ctx, obj, rect);
+
+    if (obj.type === 'line') {
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+    } else if (obj.type === 'arrow') {
+      ctx.beginPath();
+      ctx.moveTo(a.x, a.y);
+      ctx.lineTo(b.x, b.y);
+      ctx.stroke();
+      drawArrowHead(ctx, a, b, obj.width || 4);
+    } else if (obj.type === 'rect') {
+      const x = Math.min(a.x, b.x);
+      const y = Math.min(a.y, b.y);
+      const w = Math.abs(b.x - a.x);
+      const h = Math.abs(b.y - a.y);
+      if (obj.filled) ctx.fillRect(x, y, w, h);
+      else ctx.strokeRect(x, y, w, h);
+    } else if (obj.type === 'ellipse') {
+      const cx = (a.x + b.x) / 2;
+      const cy = (a.y + b.y) / 2;
+      const rx = Math.abs(b.x - a.x) / 2;
+      const ry = Math.abs(b.y - a.y) / 2;
+      ctx.beginPath();
+      ctx.ellipse(cx, cy, Math.max(rx, 0.5), Math.max(ry, 0.5), 0, 0, Math.PI * 2);
+      if (obj.filled) ctx.fill();
+      else ctx.stroke();
+    }
+    resetDrawState(ctx);
   }
 
   function redrawAll() {
@@ -89,11 +210,16 @@ export default function DrawScreen() {
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     const strokes = engineRef.current.strokes;
     ['blue', 'pink'].forEach((s) => {
-      (strokes[s] || []).forEach((stroke) => {
-        const pts = stroke.points || [];
-        for (let i = 1; i < pts.length; i++) drawSegment(stroke, pts[i - 1], pts[i]);
+      (strokes[s] || []).forEach((obj) => {
+        if (!obj.type || obj.type === 'freehand') {
+          const pts = obj.points || [];
+          for (let i = 1; i < pts.length; i++) drawSegment(obj, pts[i - 1], pts[i]);
+        } else {
+          drawShape(obj);
+        }
       });
     });
+    if (engineRef.current.shapePreview) drawShape(engineRef.current.shapePreview);
   }
 
   function resize() {
@@ -167,42 +293,111 @@ export default function DrawScreen() {
       const p = toFrac(e.clientX, e.clientY);
       const onOwnHalf = side === 'blue' ? p.x <= 0.5 : p.x >= 0.5;
       if (!onOwnHalf) return;
-      eng.isDrawing = true;
-      canvas.setPointerCapture(e.pointerId);
       const cp = clampFrac(p);
-      eng.lastLocalPoint = cp;
-      const { color, width, erasing } = toolRef.current;
-      const stroke = { color, width, erase: erasing, points: [cp] };
-      eng.strokes[side].push(stroke);
-      socket.emit('draw:stroke-start', { x: cp.x, y: cp.y, color, width, erase: erasing });
+      const { tool, color, width, dash, filled: isFilled, brushType: brush, gradient, color2 } = toolRef.current;
+      canvas.setPointerCapture(e.pointerId);
+
+      if (tool === 'freehand' || tool === 'eraser') {
+        eng.isDrawing = true;
+        eng.lastLocalPoint = cp;
+        const erase = tool === 'eraser';
+        const id = crypto.randomUUID();
+        // dash/brush texture/gradient are decorative "draw" concepts that
+        // don't make sense for an eraser — a dashed or translucent
+        // destination-out stroke would erase unevenly, leaving gaps
+        const strokeDash = erase ? 'solid' : dash;
+        const strokeBrush = erase ? 'pencil' : brush;
+        const strokeGradient = erase ? false : gradient;
+        const stroke = { id, type: 'freehand', color, width, dash: strokeDash, erase, brushType: strokeBrush, points: [cp] };
+        if (strokeGradient) {
+          stroke.gradient = true;
+          stroke.color2 = color2;
+        }
+        eng.strokes[side].push(stroke);
+        socket.emit('draw:stroke-start', {
+          id, x: cp.x, y: cp.y, color, width, dash: strokeDash, erase,
+          brushType: strokeBrush, gradient: strokeGradient, color2: strokeGradient ? color2 : undefined,
+        });
+      } else if (SHAPE_TOOL_TYPES.includes(tool)) {
+        eng.shapeStart = cp;
+        const shape = { type: tool, color, width, dash, filled: isFilled, brushType: brush, points: [cp, cp] };
+        if (gradient) {
+          shape.gradient = true;
+          shape.color2 = color2;
+        }
+        eng.shapePreview = shape;
+        redrawAll();
+      }
     }
 
     function onPointerMove(e) {
-      if (!eng.isDrawing) return;
-      const strokeList = eng.strokes[side];
-      const stroke = strokeList[strokeList.length - 1];
-      const p = clampFrac(toFrac(e.clientX, e.clientY));
-      drawSegment(stroke, eng.lastLocalPoint, p);
-      stroke.points.push(p);
-      eng.lastLocalPoint = p;
-      eng.pendingPoints.push(p);
-      scheduleFlush();
+      const { tool } = toolRef.current;
+      if (tool === 'freehand' || tool === 'eraser') {
+        if (!eng.isDrawing) return;
+        const strokeList = eng.strokes[side];
+        const stroke = strokeList[strokeList.length - 1];
+        const p = clampFrac(toFrac(e.clientX, e.clientY));
+        drawSegment(stroke, eng.lastLocalPoint, p);
+        stroke.points.push(p);
+        eng.lastLocalPoint = p;
+        eng.pendingPoints.push(p);
+        scheduleFlush();
+      } else if (SHAPE_TOOL_TYPES.includes(tool)) {
+        if (!eng.shapePreview) return;
+        const p = clampFrac(toFrac(e.clientX, e.clientY));
+        eng.shapePreview.points = [eng.shapeStart, p];
+        redrawAll();
+      }
     }
 
     function onPointerUp() {
-      if (!eng.isDrawing) return;
-      eng.isDrawing = false;
-      eng.lastLocalPoint = null;
-      flushPending();
+      const { tool } = toolRef.current;
+      if (tool === 'freehand' || tool === 'eraser') {
+        if (!eng.isDrawing) return;
+        eng.isDrawing = false;
+        eng.lastLocalPoint = null;
+        flushPending();
+      } else if (SHAPE_TOOL_TYPES.includes(tool)) {
+        if (!eng.shapePreview) return;
+        const shape = eng.shapePreview;
+        eng.shapePreview = null;
+        eng.shapeStart = null;
+        const [p1, p2] = shape.points;
+        // ignore a near-zero drag (an accidental tap rather than a real shape)
+        if (Math.hypot(p2.x - p1.x, p2.y - p1.y) < 0.006) {
+          redrawAll();
+          return;
+        }
+        const id = crypto.randomUUID();
+        eng.strokes[side].push({ id, ...shape });
+        socket.emit('draw:shape-commit', {
+          id,
+          type: shape.type,
+          color: shape.color,
+          width: shape.width,
+          dash: shape.dash,
+          filled: shape.filled,
+          brushType: shape.brushType,
+          gradient: shape.gradient,
+          color2: shape.color2,
+          points: shape.points,
+        });
+        redrawAll();
+      }
     }
 
     function onRemoteState(state) {
       eng.strokes = { blue: state.blue || [], pink: state.pink || [] };
       redrawAll();
     }
-    function onRemoteStart({ side: fromSide, point, color, width, erase }) {
+    function onRemoteStart({ side: fromSide, id, point, color, width, dash, erase, brushType: brush, gradient, color2 }) {
       if (fromSide === side) return; // our own, already drawn locally
-      eng.strokes[fromSide].push({ color, width, erase, points: [point] });
+      const stroke = { id, type: 'freehand', color, width, dash, erase, brushType: brush, points: [point] };
+      if (gradient) {
+        stroke.gradient = true;
+        stroke.color2 = color2;
+      }
+      eng.strokes[fromSide].push(stroke);
     }
     function onRemotePoints({ side: fromSide, points }) {
       if (fromSide === side) return;
@@ -215,6 +410,11 @@ export default function DrawScreen() {
         stroke.points.push(p);
         prev = p;
       });
+    }
+    function onShapeCommit({ side: fromSide, object }) {
+      if (fromSide === side) return; // our own, already added locally on pointerup
+      eng.strokes[fromSide].push(object);
+      redrawAll();
     }
     function onUndo({ side: fromSide }) {
       if (!eng.strokes[fromSide].length) return;
@@ -238,6 +438,7 @@ export default function DrawScreen() {
     socket.on('draw:state', onRemoteState);
     socket.on('draw:stroke-start', onRemoteStart);
     socket.on('draw:stroke-points', onRemotePoints);
+    socket.on('draw:shape-commit', onShapeCommit);
     socket.on('draw:undo', onUndo);
     socket.on('draw:redo', onRedo);
     socket.on('draw:cleared', onCleared);
@@ -252,40 +453,73 @@ export default function DrawScreen() {
       socket.off('draw:state', onRemoteState);
       socket.off('draw:stroke-start', onRemoteStart);
       socket.off('draw:stroke-points', onRemotePoints);
+      socket.off('draw:shape-commit', onShapeCommit);
       socket.off('draw:undo', onUndo);
       socket.off('draw:redo', onRedo);
       socket.off('draw:cleared', onCleared);
       eng.isDrawing = false;
       eng.lastLocalPoint = null;
+      eng.shapeStart = null;
+      eng.shapePreview = null;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [socket, side]);
 
+  function switchTool(tool) {
+    setActiveTool(tool);
+    setColorPopoverOpen(false);
+    setSizePopoverOpen(false);
+    setDashPopoverOpen(false);
+  }
+  function selectDrawCategory() {
+    switchTool('freehand');
+  }
+  function selectShapesCategory() {
+    switchTool(lastShapeType);
+  }
+  function selectShapeType(type) {
+    setLastShapeType(type);
+    switchTool(type);
+  }
+  function selectEraserCategory() {
+    switchTool('eraser');
+  }
+
   function selectSwatch(color) {
-    setCurrentColor(color);
-    setIsErasing(false);
+    if (colorSlot === 'secondary') setSecondColor(color);
+    else setCurrentColor(color);
     setColorPopoverOpen(false);
   }
 
   function handleCustomColor(e) {
-    setCurrentColor(e.target.value);
-    setIsErasing(false);
+    if (colorSlot === 'secondary') setSecondColor(e.target.value);
+    else setCurrentColor(e.target.value);
   }
 
-  function toggleEraser() {
-    setIsErasing((v) => !v);
-    setColorPopoverOpen(false);
+  function openColorPopoverFor(slot) {
+    setColorSlot(slot);
     setSizePopoverOpen(false);
+    setDashPopoverOpen(false);
+    setColorPopoverOpen(true);
   }
 
   function toggleColorPopover() {
     setSizePopoverOpen(false);
+    setDashPopoverOpen(false);
+    setColorSlot('primary');
     setColorPopoverOpen((v) => !v);
   }
 
   function toggleSizePopover() {
     setColorPopoverOpen(false);
+    setDashPopoverOpen(false);
     setSizePopoverOpen((v) => !v);
+  }
+
+  function toggleDashPopover() {
+    setColorPopoverOpen(false);
+    setSizePopoverOpen(false);
+    setDashPopoverOpen((v) => !v);
   }
 
   async function handleFinish() {
@@ -335,56 +569,153 @@ export default function DrawScreen() {
       <BackButton to="activities" />
       <p className={`draw-status${status.show ? ' show' : ''}`}>{status.text}</p>
 
-      <div className="draw-toolbar">
-        <Tooltip text="Pick a color">
-          <button type="button" className="draw-tool" onClick={toggleColorPopover}>🎨</button>
-        </Tooltip>
-        <Tooltip text="Brush size">
-          <button type="button" className="draw-tool" onClick={toggleSizePopover}>✏️</button>
-        </Tooltip>
-        <Tooltip text={isErasing ? 'Eraser (on)' : 'Eraser'}>
-          <button type="button" className={`draw-tool${isErasing ? ' active' : ''}`} onClick={toggleEraser}>🧹</button>
-        </Tooltip>
-        <Tooltip text="Undo last stroke">
-          <button type="button" className="draw-tool" onClick={() => socket.emit('draw:undo')}>↩️</button>
-        </Tooltip>
-        <Tooltip text="Redo">
-          <button type="button" className="draw-tool" onClick={() => socket.emit('draw:redo')}>↪️</button>
-        </Tooltip>
-        <Tooltip text={gridVisible ? 'Hide grid' : 'Show grid'}>
-          <button type="button" className={`draw-tool${gridVisible ? ' active' : ''}`} onClick={() => setGridVisible((v) => !v)}>▦</button>
-        </Tooltip>
-        <Tooltip text="Clear the whole drawing">
-          <button type="button" className="draw-tool" onClick={handleClear}>🗑️</button>
-        </Tooltip>
-        <Tooltip text="Finish & save this drawing">
-          <button type="button" className="draw-tool draw-tool-primary" onClick={handleFinish}>✅</button>
-        </Tooltip>
-      </div>
+      <div className="draw-toolbar-stack">
+        <div className="draw-toolbar-row">
+          <Tooltip text="Undo last stroke">
+            <button type="button" className="draw-tool" onClick={() => socket.emit('draw:undo')}>↩️</button>
+          </Tooltip>
+          <Tooltip text="Redo">
+            <button type="button" className="draw-tool" onClick={() => socket.emit('draw:redo')}>↪️</button>
+          </Tooltip>
+          <Tooltip text={gridVisible ? 'Hide grid' : 'Show grid'}>
+            <button type="button" className={`draw-tool${gridVisible ? ' active' : ''}`} onClick={() => setGridVisible((v) => !v)}>▦</button>
+          </Tooltip>
+          <Tooltip text="Clear the whole drawing">
+            <button type="button" className="draw-tool" onClick={handleClear}>🗑️</button>
+          </Tooltip>
+          <Tooltip text="Finish & save this drawing">
+            <button type="button" className="draw-tool draw-tool-primary" onClick={handleFinish}>✅</button>
+          </Tooltip>
+        </div>
 
-      {colorPopoverOpen && (
-        <div className="draw-popover">
-          <div className="draw-color-swatches">
-            {SWATCHES.map((color) => (
-              <button
-                type="button"
-                key={color}
-                className={`draw-swatch${color === currentColor ? ' active' : ''}`}
-                style={{ background: color }}
-                onClick={() => selectSwatch(color)}
-              />
+        <div className="draw-toolbar-row">
+          <Tooltip text="Draw">
+            <button type="button" className={`draw-tool${activeCategory === 'draw' ? ' active' : ''}`} onClick={selectDrawCategory}>✏️</button>
+          </Tooltip>
+          <Tooltip text="Shapes">
+            <button type="button" className={`draw-tool${activeCategory === 'shapes' ? ' active' : ''}`} onClick={selectShapesCategory}>📐</button>
+          </Tooltip>
+          <Tooltip text="Eraser">
+            <button type="button" className={`draw-tool${activeCategory === 'eraser' ? ' active' : ''}`} onClick={selectEraserCategory}>🧹</button>
+          </Tooltip>
+        </div>
+
+        {activeCategory === 'shapes' && (
+          <div className="draw-toolbar-row">
+            <Tooltip text="Line">
+              <button type="button" className={`draw-tool${activeTool === 'line' ? ' active' : ''}`} onClick={() => selectShapeType('line')}>╱</button>
+            </Tooltip>
+            <Tooltip text="Rectangle">
+              <button type="button" className={`draw-tool${activeTool === 'rect' ? ' active' : ''}`} onClick={() => selectShapeType('rect')}>▭</button>
+            </Tooltip>
+            <Tooltip text="Ellipse">
+              <button type="button" className={`draw-tool${activeTool === 'ellipse' ? ' active' : ''}`} onClick={() => selectShapeType('ellipse')}>◯</button>
+            </Tooltip>
+            <Tooltip text="Arrow">
+              <button type="button" className={`draw-tool${activeTool === 'arrow' ? ' active' : ''}`} onClick={() => selectShapeType('arrow')}>➚</button>
+            </Tooltip>
+            {(activeTool === 'rect' || activeTool === 'ellipse') && (
+              <Tooltip text={filled ? 'Filled shape' : 'Outline only'}>
+                <button type="button" className={`draw-fill-toggle${filled ? ' active' : ''}`} onClick={() => setFilled((v) => !v)}>
+                  {filled ? 'Filled' : 'Outline'}
+                </button>
+              </Tooltip>
+            )}
+          </div>
+        )}
+
+        {(activeCategory === 'draw' || activeCategory === 'shapes') && (
+          <div className="draw-toolbar-row">
+            <Tooltip text="Pencil (hard edge)">
+              <button type="button" className={`draw-tool${brushType === 'pencil' ? ' active' : ''}`} onClick={() => setBrushType('pencil')}>✎</button>
+            </Tooltip>
+            <Tooltip text="Brush (soft edge)">
+              <button type="button" className={`draw-tool${brushType === 'brush' ? ' active' : ''}`} onClick={() => setBrushType('brush')}>🖌️</button>
+            </Tooltip>
+            <Tooltip text="Marker (translucent)">
+              <button type="button" className={`draw-tool${brushType === 'marker' ? ' active' : ''}`} onClick={() => setBrushType('marker')}>🖊️</button>
+            </Tooltip>
+          </div>
+        )}
+
+        {(activeCategory === 'draw' || activeCategory === 'shapes') && (
+          <div className="draw-toolbar-row">
+            <Tooltip text="Primary color">
+              <button type="button" className="draw-tool draw-color-preview" style={{ background: currentColor }} onClick={() => openColorPopoverFor('primary')} />
+            </Tooltip>
+            <Tooltip text={gradientOn ? 'Gradient (on)' : 'Gradient color'}>
+              <button type="button" className={`draw-tool${gradientOn ? ' active' : ''}`} onClick={() => setGradientOn((v) => !v)}>🌈</button>
+            </Tooltip>
+            {gradientOn && (
+              <Tooltip text="Secondary color">
+                <button type="button" className="draw-tool draw-color-preview" style={{ background: secondColor }} onClick={() => openColorPopoverFor('secondary')} />
+              </Tooltip>
+            )}
+            <Tooltip text="Brush size">
+              <button type="button" className="draw-tool" onClick={toggleSizePopover}>📏</button>
+            </Tooltip>
+            <Tooltip text="Line style">
+              <button type="button" className="draw-tool" onClick={toggleDashPopover}>┅</button>
+            </Tooltip>
+          </div>
+        )}
+
+        {activeCategory === 'eraser' && (
+          <div className="draw-toolbar-row">
+            <Tooltip text="Eraser size">
+              <button type="button" className="draw-tool" onClick={toggleSizePopover}>📏</button>
+            </Tooltip>
+          </div>
+        )}
+
+        {colorPopoverOpen && (activeCategory === 'draw' || activeCategory === 'shapes') && (
+          <div className="draw-popover draw-popover-palette">
+            <div className="draw-color-swatches">
+              {PALETTE.map((color) => (
+                <button
+                  type="button"
+                  key={color}
+                  className={`draw-swatch${color === (colorSlot === 'secondary' ? secondColor : currentColor) ? ' active' : ''}`}
+                  style={{ background: color }}
+                  onClick={() => selectSwatch(color)}
+                />
+              ))}
+            </div>
+            <input
+              type="color"
+              className="draw-color-custom"
+              value={colorSlot === 'secondary' ? secondColor : currentColor}
+              onChange={handleCustomColor}
+            />
+          </div>
+        )}
+
+        {sizePopoverOpen && (
+          <div className="draw-popover">
+            <input type="range" min="2" max="24" value={currentWidth} onChange={(e) => setCurrentWidth(Number(e.target.value))} />
+            <span className="draw-size-value">{currentWidth}px</span>
+          </div>
+        )}
+
+        {dashPopoverOpen && (activeCategory === 'draw' || activeCategory === 'shapes') && (
+          <div className="draw-popover">
+            {DASH_STYLES.map((d) => (
+              <Tooltip text={d} key={d}>
+                <button
+                  type="button"
+                  className={`draw-dash-btn${currentDash === d ? ' active' : ''}`}
+                  onClick={() => {
+                    setCurrentDash(d);
+                    setDashPopoverOpen(false);
+                  }}
+                >
+                  <span className="draw-dash-preview" style={{ borderTopStyle: d }} />
+                </button>
+              </Tooltip>
             ))}
           </div>
-          <input type="color" className="draw-color-custom" value={currentColor} onChange={handleCustomColor} />
-        </div>
-      )}
-
-      {sizePopoverOpen && (
-        <div className="draw-popover">
-          <input type="range" min="2" max="24" value={currentWidth} onChange={(e) => setCurrentWidth(Number(e.target.value))} />
-          <span className="draw-size-value">{currentWidth}px</span>
-        </div>
-      )}
+        )}
+      </div>
 
       {!partnerHere && (
         <div className="waiting-overlay">

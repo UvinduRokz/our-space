@@ -455,9 +455,21 @@ const DASH_STYLES = ['solid', 'dashed', 'dotted'];
 function sanitizeDash(dash) {
   return DASH_STYLES.includes(dash) ? dash : 'solid';
 }
+const BRUSH_TYPES = ['pencil', 'brush', 'marker'];
+function sanitizeBrushType(brush) {
+  return BRUSH_TYPES.includes(brush) ? brush : 'pencil';
+}
 const SHAPE_TYPES = ['line', 'rect', 'ellipse', 'arrow', 'text'];
 function sanitizeText(text) {
   return typeof text === 'string' ? text.slice(0, 200) : '';
+}
+// Client-generated (not server-generated): the sender needs to know its own
+// object's id immediately, with no round trip, so it can reference that
+// object later for move/delete (Select tool). Since ids are only ever
+// looked up within the creating side's own bucket, a malicious/duplicate id
+// can only affect that side's own objects — never the partner's.
+function sanitizeId(id) {
+  return typeof id === 'string' && id.length > 0 && id.length <= 64 ? id : crypto.randomUUID();
 }
 function sanitizeFontSize(size) {
   const n = Number(size);
@@ -686,13 +698,27 @@ io.on('connection', (socket) => {
     const width = sanitizeWidth(data && data.width);
     const dash = sanitizeDash(data && data.dash);
     const erase = !!(data && data.erase);
-    const id = crypto.randomUUID();
+    const id = sanitizeId(data && data.id);
+    // brush texture/gradient are decorative "draw" concepts that don't make
+    // sense for an eraser (a translucent or gradient destination-out stroke
+    // would erase unevenly) — forced off server-side too, not just trusted
+    // from the client, so a stale/buggy client can't send a broken erase.
+    const brushType = erase ? 'pencil' : sanitizeBrushType(data && data.brushType);
+    const gradient = erase ? false : !!(data && data.gradient);
+    const color2 = gradient ? sanitizeColor(data && data.color2) : undefined;
     const strokes = drawState[socket.side];
-    strokes.push({ id, type: 'freehand', color, width, dash, erase, points: [p] });
+    const stroke = { id, type: 'freehand', color, width, dash, erase, brushType, points: [p] };
+    if (gradient) {
+      stroke.gradient = true;
+      stroke.color2 = color2;
+    }
+    strokes.push(stroke);
     if (strokes.length > MAX_STROKES_PER_SIDE) strokes.shift();
     drawRedoStack[socket.side] = []; // a new stroke invalidates old redo history
     const otherSide = SIDES.find((s) => s !== socket.side);
-    if (isOnline(otherSide)) io.to(otherSide).emit('draw:stroke-start', { side: socket.side, id, point: p, color, width, dash, erase });
+    if (isOnline(otherSide)) {
+      io.to(otherSide).emit('draw:stroke-start', { side: socket.side, id, point: p, color, width, dash, erase, brushType, gradient, color2 });
+    }
   });
 
   socket.on('draw:stroke-points', (data) => {
@@ -734,15 +760,20 @@ io.on('connection', (socket) => {
     const expectedCount = type === 'text' ? 1 : 2;
     if (rawPoints.length !== expectedCount) return;
     const points = rawPoints.map((p) => clampDrawPoint(socket.side, { x: Number(p.x) || 0, y: Number(p.y) || 0 }));
-    const id = crypto.randomUUID();
+    const id = sanitizeId(data && data.id);
     const obj = {
       id,
       type,
       color: sanitizeColor(data && data.color),
       width: sanitizeWidth(data && data.width),
       dash: sanitizeDash(data && data.dash),
+      brushType: sanitizeBrushType(data && data.brushType),
       points,
     };
+    if (data && data.gradient) {
+      obj.gradient = true;
+      obj.color2 = sanitizeColor(data.color2);
+    }
     if (type === 'rect' || type === 'ellipse') obj.filled = !!(data && data.filled);
     if (type === 'text') {
       obj.text = sanitizeText(data && data.text);
