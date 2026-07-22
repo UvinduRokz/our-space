@@ -1,0 +1,40 @@
+.icon-btn {
+  position: relative;
+  width: var(--icon-btn-size, 44px);
+  height: var(--icon-btn-size, 44px);
+  padding: 0;
+  border: none;
+  border-radius: 50%;
+  font-size: 1rem;
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+  cursor: pointer;
+  transition: background 0.15s ease, transform 0.15s ease;
+}
+
+/* border-radius:50% makes some browsers exclude the corner wedges outside
+   the inscribed circle from click hit-testing — a tap near the edge of the
+   visible circle can miss the button entirely and fall through to
+   whatever's behind it. This square (non-rounded) pseudo-element sits
+   behind the button but still counts as part of its click target,
+   restoring the full square footprint as clickable regardless of the
+   circular visual clip. See --icon-btn-hit-inset on the component for how
+   far it extends. */
+.icon-btn::before {
+  content: '';
+  position: absolute;
+  inset: var(--icon-btn-hit-inset, -3px);
+}
+
+.icon-btn:active {
+  filter: brightness(0.75);
+  transform: scale(0.9);
+}
+
+.icon-btn--play {
+  background: linear-gradient(90deg, var(--blue, #4f8fff), var(--pink, #ff5fa8));
+}
+
+.icon-btn.active {
+  background: rgba(255, 95, 168, 0.3);
+}

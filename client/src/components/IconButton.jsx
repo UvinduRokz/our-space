@@ -1,0 +1,42 @@
+import './IconButton.css';
+
+// The one place border-radius:50% hit-testing gets fixed. Every circular
+// button in the app (nav icons, music transport controls, draw toolbar,
+// etc.) should render through this instead of hand-rolling its own
+// border-radius button — that duplication is exactly what caused the same
+// corner-click bug to need fixing twice in the old vanilla app.
+//
+// hitAreaInset: how far the invisible square click-target extends beyond
+// the visible circle, in px (negative = larger target). Default (-3) is
+// safe even for the tightest button spacing in the app (8px gaps); pass a
+// bigger value (e.g. -6) for buttons with more breathing room around them.
+export default function IconButton({
+  children,
+  onClick,
+  title,
+  active = false,
+  size = 44,
+  variant,
+  hitAreaInset = -3,
+  className = '',
+  style,
+  ...rest
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      title={title}
+      aria-label={title}
+      className={`icon-btn${active ? ' active' : ''}${variant ? ` icon-btn--${variant}` : ''}${className ? ` ${className}` : ''}`}
+      style={{
+        '--icon-btn-size': `${size}px`,
+        '--icon-btn-hit-inset': `${hitAreaInset}px`,
+        ...style,
+      }}
+      {...rest}
+    >
+      {children}
+    </button>
+  );
+}
