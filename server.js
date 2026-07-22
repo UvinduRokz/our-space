@@ -438,7 +438,7 @@ function sanitizeWidth(width) {
 // same pattern as Draw Together's undo/redo. Clients never apply their own
 // play/pause/seek locally; they wait for the broadcast echo, so both
 // screens (and any extra devices on the same side) end up identical.
-let musicState = { trackId: null, isPlaying: false, positionAtStart: 0, startedAt: null, activePlaylistId: null, repeatMode: 'track' };
+let musicState = { trackId: null, isPlaying: true, positionAtStart: 0, startedAt: null, activePlaylistId: null, repeatMode: 'track' };
 {
   const builtins = loadMusic().filter((t) => t.builtin).sort((a, b) => a.ts - b.ts);
   if (builtins.length) musicState.trackId = builtins[0].id;
