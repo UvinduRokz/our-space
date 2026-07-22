@@ -9,11 +9,13 @@ import GalleryScreen from './screens/GalleryScreen.jsx';
 import BackButton from './components/BackButton.jsx';
 
 // Screens not built yet (later phases) get a placeholder instead of a
-// crash if navigated to early.
-function ComingSoon({ label }) {
+// crash if navigated to early. `backTo` matches where each screen's real
+// back button points in the old app — Wordle/Hunt/Draw are reached via
+// Activities, but Music is reached directly from Main.
+function ComingSoon({ label, backTo }) {
   return (
     <section className="screen">
-      <BackButton to="activities" />
+      <BackButton to={backTo} />
       <h1>{label}</h1>
       <p>not built yet — coming in a later phase</p>
     </section>
@@ -26,10 +28,10 @@ const SCREENS = {
   profile: ProfileScreen,
   history: HistoryScreen,
   gallery: GalleryScreen,
-  'game-wordle': () => <ComingSoon label="Wordle Together" />,
-  'game-hunt': () => <ComingSoon label="Letter Hunt" />,
-  'game-draw': () => <ComingSoon label="Draw Together" />,
-  music: () => <ComingSoon label="Music" />,
+  'game-wordle': () => <ComingSoon label="Wordle Together" backTo="activities" />,
+  'game-hunt': () => <ComingSoon label="Letter Hunt" backTo="activities" />,
+  'game-draw': () => <ComingSoon label="Draw Together" backTo="activities" />,
+  music: () => <ComingSoon label="Music" backTo="main" />,
 };
 
 function Shell() {
