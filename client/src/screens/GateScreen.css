@@ -3,5 +3,5 @@
   flex-direction: column;
   gap: 12px;
   width: 100%;
-  max-width: 280px;
+  max-width: clamp(280px, 45vw, 380px);
 }

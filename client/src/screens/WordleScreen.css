@@ -5,7 +5,7 @@
 .game-text-input {
   margin-top: 18px;
   width: 100%;
-  max-width: 260px;
+  max-width: clamp(260px, 35vw, 340px);
   text-align: center;
   text-transform: uppercase;
   letter-spacing: 0.2em;
@@ -18,7 +18,7 @@
   gap: 6px;
   margin-top: 12px;
   width: 100%;
-  max-width: 260px;
+  max-width: clamp(260px, 35vw, 340px);
 }
 .wordle-tile {
   aspect-ratio: 1;

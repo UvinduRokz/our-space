@@ -3,6 +3,6 @@
   flex-direction: column;
   gap: 14px;
   width: 100%;
-  max-width: 320px;
+  max-width: clamp(320px, 45vw, 460px);
   margin-top: 16px;
 }

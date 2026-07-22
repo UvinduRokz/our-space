@@ -1,9 +1,9 @@
 .recap-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
   gap: 10px;
   width: 100%;
-  max-width: 340px;
+  max-width: clamp(340px, 55vw, 560px);
   margin: 16px 0;
 }
 .recap-tile {
@@ -30,7 +30,7 @@
   padding: 0;
   margin: 8px 0 24px;
   width: 100%;
-  max-width: 360px;
+  max-width: clamp(360px, 55vw, 560px);
   display: flex;
   flex-direction: column;
   gap: 8px;

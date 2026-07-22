@@ -3,7 +3,9 @@
   flex-direction: column;
   gap: 12px;
   width: 100%;
-  max-width: 280px;
+  /* scales with viewport instead of staying pinned to a phone-sized column
+     on desktop — still caps out so a single-column form doesn't get silly-wide */
+  max-width: clamp(280px, 55vw, 440px);
   text-align: left;
 }
 .profile-form label {

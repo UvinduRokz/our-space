@@ -20,7 +20,7 @@
   display: flex;
   gap: 8px;
   width: 100%;
-  max-width: 280px;
+  max-width: clamp(280px, 40vw, 400px);
 }
 .hunt-form input {
   margin-top: 0;
@@ -38,7 +38,7 @@
   padding: 0;
   margin: 10px 0;
   width: 100%;
-  max-width: 280px;
+  max-width: clamp(280px, 45vw, 460px);
   display: flex;
   flex-wrap: wrap;
   gap: 6px;

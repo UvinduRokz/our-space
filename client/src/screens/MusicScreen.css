@@ -1,6 +1,8 @@
 .music-now-playing {
   width: 100%;
-  max-width: 340px;
+  /* scales with viewport instead of staying pinned to a phone-sized column
+     on desktop — still caps out so it doesn't get silly-wide */
+  max-width: clamp(340px, 55vw, 520px);
   padding: 16px;
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.08);
@@ -38,7 +40,7 @@
   padding: 0;
   margin: 16px 0;
   width: 100%;
-  max-width: 340px;
+  max-width: clamp(340px, 55vw, 520px);
   display: flex;
   flex-direction: column;
   gap: 6px;
@@ -72,7 +74,7 @@
 
 .music-playlists {
   width: 100%;
-  max-width: 340px;
+  max-width: clamp(340px, 55vw, 520px);
   margin-top: 18px;
 }
 .music-playlists-header {
@@ -185,7 +187,7 @@
   flex-direction: column;
   gap: 10px;
   width: 100%;
-  max-width: 280px;
+  max-width: clamp(280px, 45vw, 400px);
   margin-bottom: 24px;
 }
 .music-upload-form input[type='text'] {

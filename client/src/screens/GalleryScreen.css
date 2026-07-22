@@ -1,9 +1,11 @@
 .gallery-grid {
   display: grid;
-  grid-template-columns: repeat(2, 1fr);
+  /* more columns kick in automatically as space allows, instead of two
+     fixed columns stretching wide and thin on desktop */
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
   gap: 10px;
   width: 100%;
-  max-width: 360px;
+  max-width: clamp(360px, 70vw, 900px);
   margin: 16px 0 24px;
 }
 .gallery-tile {

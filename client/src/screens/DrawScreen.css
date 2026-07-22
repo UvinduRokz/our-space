@@ -3,6 +3,19 @@
   overflow: hidden;
 }
 
+.draw-stage-frame {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.draw-stage {
+  position: relative;
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.15), 0 20px 60px rgba(0, 0, 0, 0.4);
+}
+
 .draw-backdrop {
   position: absolute;
   inset: 0;

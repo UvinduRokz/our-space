@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext.jsx';
 import BackButton from '../components/BackButton.jsx';
 import Modal from '../components/Modal.jsx';
@@ -7,12 +7,21 @@ import './DrawScreen.css';
 
 const SWATCHES = ['#1a1a1a', '#ffffff', '#e74c3c', '#f39c12', '#f1c40f', '#2ecc71', '#1abc9c', '#4f8fff', '#ff5fa8', '#9b59b6'];
 
+// Fixed on purpose: the canvas used to just stretch to fill whichever
+// device's screen it was on, so the same fractional stroke coordinates
+// drew a different shape (circle vs. ellipse) for each partner. Locking
+// both sides to one shared ratio and letterboxing it (see computeStageSize
+// below) keeps strokes shaped the same everywhere, no matter the device.
+const CANVAS_ASPECT = 9 / 16; // width / height — a tall "notebook page" that suits phones, pillarboxed on wide desktop screens
+
 export default function DrawScreen() {
   const { socket, side, profile, apiPost, partnerActivity } = useApp();
   const partnerHere = partnerActivity === 'draw';
 
+  const stageFrameRef = useRef(null);
   const canvasRef = useRef(null);
   const ctxRef = useRef(null);
+  const [stageSize, setStageSize] = useState({ width: 0, height: 0 });
   // Mutable drawing engine state that must NOT trigger React re-renders on
   // every pointer move — canvas drawing stays imperative, same as the old
   // vanilla module's closure variables, just held in a ref instead.
@@ -99,10 +108,45 @@ export default function DrawScreen() {
     redrawAll();
   }
 
+  // Largest box matching CANVAS_ASPECT that still fits inside the available
+  // screen space — the letterboxing/pillarboxing that keeps the canvas's
+  // shape identical on both partners' devices regardless of their own
+  // screen's aspect ratio.
+  function computeStageSize() {
+    const frame = stageFrameRef.current;
+    if (!frame) return;
+    const availW = frame.clientWidth;
+    const availH = frame.clientHeight;
+    let width = availW;
+    let height = width / CANVAS_ASPECT;
+    if (height > availH) {
+      height = availH;
+      width = height * CANVAS_ASPECT;
+    }
+    setStageSize({ width, height });
+  }
+
+  useEffect(() => {
+    computeStageSize();
+    window.addEventListener('resize', computeStageSize);
+    return () => window.removeEventListener('resize', computeStageSize);
+  }, []);
+
+  // Runs whenever the letterboxed stage box changes size — separate from
+  // the socket-setup effect below so the canvas pixel buffer stays in sync
+  // with the actual rendered box, not the full (unletterboxed) screen.
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas || !stageSize.width || !stageSize.height) return;
+    if (!ctxRef.current) ctxRef.current = canvas.getContext('2d');
+    resize();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stageSize]);
+
   useEffect(() => {
     if (!socket) return;
     const canvas = canvasRef.current;
-    ctxRef.current = canvas.getContext('2d');
+    if (!ctxRef.current) ctxRef.current = canvas.getContext('2d');
     const eng = engineRef.current;
 
     function flushPending() {
@@ -190,7 +234,6 @@ export default function DrawScreen() {
     canvas.addEventListener('pointermove', onPointerMove);
     canvas.addEventListener('pointerup', onPointerUp);
     canvas.addEventListener('pointercancel', onPointerUp);
-    window.addEventListener('resize', resize);
 
     socket.on('draw:state', onRemoteState);
     socket.on('draw:stroke-start', onRemoteStart);
@@ -199,7 +242,6 @@ export default function DrawScreen() {
     socket.on('draw:redo', onRedo);
     socket.on('draw:cleared', onCleared);
 
-    resize();
     socket.emit('draw:sync');
 
     return () => {
@@ -207,7 +249,6 @@ export default function DrawScreen() {
       canvas.removeEventListener('pointermove', onPointerMove);
       canvas.removeEventListener('pointerup', onPointerUp);
       canvas.removeEventListener('pointercancel', onPointerUp);
-      window.removeEventListener('resize', resize);
       socket.off('draw:state', onRemoteState);
       socket.off('draw:stroke-start', onRemoteStart);
       socket.off('draw:stroke-points', onRemotePoints);
@@ -278,13 +319,17 @@ export default function DrawScreen() {
 
   return (
     <section className="screen draw-screen">
-      <div className="draw-backdrop" />
-      <canvas ref={canvasRef} className="draw-canvas" />
-      <div className="draw-guides">
-        {gridVisible && <div className="draw-grid-overlay" />}
-        <div className="draw-divider" />
-        <span className="draw-tag draw-tag-left">💙</span>
-        <span className="draw-tag draw-tag-right">💗</span>
+      <div className="draw-stage-frame" ref={stageFrameRef}>
+        <div className="draw-stage" style={{ width: stageSize.width, height: stageSize.height }}>
+          <div className="draw-backdrop" />
+          <canvas ref={canvasRef} className="draw-canvas" />
+          <div className="draw-guides">
+            {gridVisible && <div className="draw-grid-overlay" />}
+            <div className="draw-divider" />
+            <span className="draw-tag draw-tag-left">💙</span>
+            <span className="draw-tag draw-tag-right">💗</span>
+          </div>
+        </div>
       </div>
 
       <BackButton to="activities" />

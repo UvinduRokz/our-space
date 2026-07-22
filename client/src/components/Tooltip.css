@@ -4,9 +4,12 @@
 }
 
 .tooltip-bubble {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%) translateY(2px);
+  /* positioned in JS via getBoundingClientRect (see Tooltip.jsx) so it can
+     flip and clamp against the viewport — top/left below are just an
+     off-screen parking spot used before the first measurement runs */
+  position: fixed;
+  top: -9999px;
+  left: -9999px;
   z-index: 100;
   padding: 6px 10px;
   border-radius: 8px;
@@ -18,20 +21,12 @@
   white-space: nowrap;
   opacity: 0;
   pointer-events: none;
-  transition: opacity 0.15s ease, transform 0.15s ease;
-}
-
-.tooltip-top .tooltip-bubble {
-  bottom: calc(100% + 8px);
-}
-.tooltip-bottom .tooltip-bubble {
-  top: calc(100% + 8px);
+  transition: opacity 0.15s ease;
 }
 
 .tooltip-wrapper:hover .tooltip-bubble,
 .tooltip-wrapper:focus-within .tooltip-bubble {
   opacity: 1;
-  transform: translateX(-50%) translateY(0);
 }
 
 /* touch devices have no real hover — showing tooltips there just adds a
