@@ -438,8 +438,9 @@ let drawState = { blue: [], pink: [] };
 let drawRedoStack = { blue: [], pink: [] };
 const MAX_STROKES_PER_SIDE = 200;
 // Chosen once per drawing (whoever picks first locks it for both sides —
-// see draw:set-aspect-ratio) and reset back to null on draw:clear, so a
-// fresh drawing gets asked again. null means "not chosen yet."
+// see draw:set-aspect-ratio) and reset back to null on draw:reset (the
+// full-wipe button — draw:clear only wipes the clicking side), so a fresh
+// drawing gets asked again. null means "not chosen yet."
 const ASPECT_PRESETS = { portrait: 9 / 16, square: 1, landscape: 16 / 9 };
 let drawAspectRatio = null;
 let drawAspectPreset = null;
@@ -465,7 +466,7 @@ const BRUSH_TYPES = ['pencil', 'brush', 'marker'];
 function sanitizeBrushType(brush) {
   return BRUSH_TYPES.includes(brush) ? brush : 'pencil';
 }
-const SHAPE_TYPES = ['line', 'rect', 'ellipse', 'arrow', 'text'];
+const SHAPE_TYPES = ['line', 'rect', 'ellipse', 'arrow', 'text', 'fill'];
 function sanitizeText(text) {
   return typeof text === 'string' ? text.slice(0, 200) : '';
 }
@@ -773,7 +774,7 @@ io.on('connection', (socket) => {
     const type = data && data.type;
     if (!SHAPE_TYPES.includes(type)) return;
     const rawPoints = Array.isArray(data && data.points) ? data.points : [];
-    const expectedCount = type === 'text' ? 1 : 2;
+    const expectedCount = type === 'text' || type === 'fill' ? 1 : 2;
     if (rawPoints.length !== expectedCount) return;
     const points = rawPoints.map((p) => clampDrawPoint(socket.side, { x: Number(p.x) || 0, y: Number(p.y) || 0 }));
     const id = sanitizeId(data && data.id);
@@ -812,7 +813,7 @@ io.on('connection', (socket) => {
     const obj = strokes.find((s) => s.id === (data && data.id));
     if (!obj) return;
     const rawPoints = Array.isArray(data && data.points) ? data.points : [];
-    const expectedCount = obj.type === 'text' ? 1 : 2;
+    const expectedCount = obj.type === 'text' || obj.type === 'fill' ? 1 : 2;
     if (rawPoints.length !== expectedCount) return;
     obj.points = rawPoints.map((p) => clampDrawPoint(socket.side, { x: Number(p.x) || 0, y: Number(p.y) || 0 }));
     const otherSide = SIDES.find((s) => s !== socket.side);
@@ -828,14 +829,28 @@ io.on('connection', (socket) => {
     if (isOnline(otherSide)) io.to(otherSide).emit('draw:object-delete', { side: socket.side, id: removed.id });
   });
 
+  // Clears only the clicking side's own half — not the partner's, and not
+  // the chosen aspect ratio (that's shared for the whole drawing).
   socket.on('draw:clear', () => {
+    const side = socket.side;
+    const hadStrokes = drawState[side].length > 0;
+    if (hadStrokes) appendHistory('draw_cleared', side, {});
+    drawState[side] = [];
+    drawRedoStack[side] = [];
+    io.emit('draw:cleared', { side });
+  });
+
+  // Wipes both sides AND the chosen aspect ratio, re-opening the picker —
+  // the "start a whole new drawing" action, distinct from the per-side
+  // draw:clear above.
+  socket.on('draw:reset', () => {
     const hadStrokes = drawState.blue.length > 0 || drawState.pink.length > 0;
-    if (hadStrokes) appendHistory('draw_cleared', socket.side, {});
+    if (hadStrokes) appendHistory('draw_reset', socket.side, {});
     drawState = { blue: [], pink: [] };
     drawRedoStack = { blue: [], pink: [] };
-    drawAspectRatio = null; // a fresh drawing gets to choose its own aspect ratio again
+    drawAspectRatio = null;
     drawAspectPreset = null;
-    io.emit('draw:cleared');
+    io.emit('draw:cleared', { side: null });
     io.emit('draw:aspect-ratio', { ratio: null, preset: null });
   });
 

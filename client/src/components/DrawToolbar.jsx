@@ -13,6 +13,7 @@ const CATEGORY_OPTIONS = [
   { id: 'draw', icon: '✏️', label: 'Draw' },
   { id: 'shapes', icon: '📐', label: 'Shapes' },
   { id: 'text', icon: '🔤', label: 'Text' },
+  { id: 'fill', icon: '🪣', label: 'Fill' },
   { id: 'eraser', icon: '🧹', label: 'Eraser' },
   { id: 'select', icon: '🖱️', label: 'Select' },
 ];
@@ -33,23 +34,22 @@ const DASH_OPTIONS = [
   { id: 'dotted', label: 'Dotted' },
 ];
 
-// Icon-over-label (mobile tab bar) / icon-beside-label (desktop rail) button
-// used for every choice in the toolbar — every button gets a real, always-
-// visible text label, not just a Tooltip (Tooltip is hidden on touch devices
-// entirely, which was the actual root cause of "I can't find anything").
-function LabeledButton({ icon, label, active, onClick, disabled, tooltip, variant = 'tool' }) {
+// Icon + a real, always-visible text label (icon-over-label on the mobile
+// tab bar, icon-beside-label on the desktop rail) — no Tooltip here on
+// purpose: it already names itself, so a hover tooltip would just be
+// redundant. Tooltip is reserved for the genuinely icon-only buttons
+// elsewhere in this toolbar (utilities, color swatches, dash previews…).
+function LabeledButton({ icon, label, active, onClick, disabled, variant = 'tool' }) {
   return (
-    <Tooltip text={tooltip || label}>
-      <button
-        type="button"
-        className={`draw-labeled-btn draw-labeled-btn--${variant}${active ? ' active' : ''}`}
-        onClick={onClick}
-        disabled={disabled}
-      >
-        <span className="draw-labeled-btn-icon">{icon}</span>
-        <span className="draw-labeled-btn-text">{label}</span>
-      </button>
-    </Tooltip>
+    <button
+      type="button"
+      className={`draw-labeled-btn draw-labeled-btn--${variant}${active ? ' active' : ''}`}
+      onClick={onClick}
+      disabled={disabled}
+    >
+      <span className="draw-labeled-btn-icon">{icon}</span>
+      <span className="draw-labeled-btn-text">{label}</span>
+    </button>
   );
 }
 
@@ -74,7 +74,9 @@ function ColorSwatch({ slot, color, colorSlot, colorPopoverOpen, openColorPopove
   }
   return (
     <>
-      <button type="button" className="draw-color-swatch-btn" style={{ background: color }} onClick={handleToggle} />
+      <Tooltip text={slot === 'secondary' ? 'Secondary color' : 'Primary color'}>
+        <button type="button" className="draw-color-swatch-btn" style={{ background: color }} onClick={handleToggle} />
+      </Tooltip>
       {isOpenForThis && (
         <div className="draw-palette">
           <div className="draw-color-swatches">
@@ -116,6 +118,7 @@ export default function DrawToolbar({
   selectEraserCategory,
   selectTextCategory,
   selectSelectCategory,
+  selectFillCategory,
   deleteSelected,
   selectSwatch,
   handleCustomColor,
@@ -131,6 +134,7 @@ export default function DrawToolbar({
   onUndo,
   onRedo,
   onClear,
+  onReset,
   onFinish,
 }) {
   // Collapsed by default (mobile only — see DrawToolbar.css, this has no
@@ -153,6 +157,7 @@ export default function DrawToolbar({
     draw: selectDrawCategory,
     shapes: selectShapesCategory,
     text: selectTextCategory,
+    fill: selectFillCategory,
     eraser: selectEraserCategory,
     select: selectSelectCategory,
   };
@@ -169,8 +174,11 @@ export default function DrawToolbar({
           <Tooltip text={gridVisible ? 'Hide grid' : 'Show grid'}>
             <button type="button" className={`draw-tool${gridVisible ? ' active' : ''}`} onClick={() => setGridVisible((v) => !v)}>▦</button>
           </Tooltip>
-          <Tooltip text="Clear the whole drawing">
+          <Tooltip text="Clear your half only">
             <button type="button" className="draw-tool" onClick={onClear}>🗑️</button>
+          </Tooltip>
+          <Tooltip text="Reset the whole drawing (both sides + canvas shape)">
+            <button type="button" className="draw-tool" onClick={onReset}>🔄</button>
           </Tooltip>
           <Tooltip text="Finish & save this drawing">
             <button type="button" className="draw-tool draw-tool-primary" onClick={onFinish}>✅</button>
@@ -225,7 +233,7 @@ export default function DrawToolbar({
               </PanelSection>
             )}
 
-            {(activeCategory === 'draw' || activeCategory === 'shapes' || activeCategory === 'text') && (
+            {(activeCategory === 'draw' || activeCategory === 'shapes' || activeCategory === 'text' || activeCategory === 'fill') && (
               <PanelSection label="Color">
                 <ColorSwatch
                   slot="primary"
@@ -242,7 +250,9 @@ export default function DrawToolbar({
 
             {(activeCategory === 'draw' || activeCategory === 'shapes') && (
               <PanelSection label="Gradient">
-                <button type="button" className={`draw-tool${gradientOn ? ' active' : ''}`} onClick={() => setGradientOn((v) => !v)}>🌈</button>
+                <Tooltip text={gradientOn ? 'Gradient (on)' : 'Gradient color'}>
+                  <button type="button" className={`draw-tool${gradientOn ? ' active' : ''}`} onClick={() => setGradientOn((v) => !v)}>🌈</button>
+                </Tooltip>
                 {gradientOn && (
                   <ColorSwatch
                     slot="secondary"

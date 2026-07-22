@@ -17,6 +17,82 @@ function distToSegment(p, a, b) {
   return Math.hypot(p.x - (a.x + t * dx), p.y - (a.y + t * dy));
 }
 
+function hexToRgba(hex) {
+  return [parseInt(hex.slice(1, 3), 16), parseInt(hex.slice(3, 5), 16), parseInt(hex.slice(5, 7), 16), 255];
+}
+
+// A tiny inline SVG embedding the tool's own emoji as the cursor image —
+// cheap way to get a real per-tool cursor (pencil for pencil, brush for
+// brush, bucket for fill…) without needing actual cursor image assets.
+// Hotspot is the emoji's bottom-left tip, matching where a real pencil/
+// brush would touch the page.
+function emojiCursor(emoji, fallback = 'crosshair') {
+  const svg = `<svg xmlns='http://www.w3.org/2000/svg' width='32' height='32' font-size='26'><text x='0' y='26'>${emoji}</text></svg>`;
+  return `url("data:image/svg+xml;utf8,${encodeURIComponent(svg)}") 2 28, ${fallback}`;
+}
+
+// Classic stack-based flood fill, operating on the canvas's actual rendered
+// pixels (not the vector stroke list) — clamped to the clicking side's half
+// so a fill can never bleed across the dividing line, same rule as every
+// other tool. Deliberately re-run at replay time (see redrawAll) rather
+// than cached as a static image: since it reads whatever pixels already
+// exist at that point in that side's own stroke history, replaying the
+// full sequence from a blank canvas reproduces the identical result.
+function floodFillAt(ctx, canvas, side, fracPoint, fillColorHex, tolerance = 32) {
+  const w = canvas.width;
+  const h = canvas.height;
+  if (!w || !h) return;
+  const px = Math.min(w - 1, Math.max(0, Math.round(fracPoint.x * w)));
+  const py = Math.min(h - 1, Math.max(0, Math.round(fracPoint.y * h)));
+  const imgData = ctx.getImageData(0, 0, w, h);
+  const data = imgData.data;
+  const fill = hexToRgba(fillColorHex);
+
+  function idx(x, y) {
+    return (y * w + x) * 4;
+  }
+  function matches(i) {
+    return (
+      Math.abs(data[i] - target[0]) <= tolerance &&
+      Math.abs(data[i + 1] - target[1]) <= tolerance &&
+      Math.abs(data[i + 2] - target[2]) <= tolerance &&
+      Math.abs(data[i + 3] - target[3]) <= tolerance
+    );
+  }
+
+  const startIdx = idx(px, py);
+  const target = [data[startIdx], data[startIdx + 1], data[startIdx + 2], data[startIdx + 3]];
+  if (
+    Math.abs(target[0] - fill[0]) <= 1 &&
+    Math.abs(target[1] - fill[1]) <= 1 &&
+    Math.abs(target[2] - fill[2]) <= 1 &&
+    Math.abs(target[3] - fill[3]) <= 1
+  ) {
+    return; // already this color, nothing to do
+  }
+
+  const minX = side === 'blue' ? 0 : Math.ceil(w / 2);
+  const maxX = side === 'blue' ? Math.floor(w / 2) : w - 1;
+  const visited = new Uint8Array(w * h);
+  const stack = [[px, py]];
+
+  while (stack.length) {
+    const [x, y] = stack.pop();
+    if (x < minX || x > maxX || y < 0 || y >= h) continue;
+    const vIdx = y * w + x;
+    if (visited[vIdx]) continue;
+    const i = idx(x, y);
+    if (!matches(i)) continue;
+    visited[vIdx] = 1;
+    data[i] = fill[0];
+    data[i + 1] = fill[1];
+    data[i + 2] = fill[2];
+    data[i + 3] = fill[3];
+    stack.push([x + 1, y], [x - 1, y], [x, y + 1], [x, y - 1]);
+  }
+  ctx.putImageData(imgData, 0, 0);
+}
+
 // Fixed on purpose: the canvas used to just stretch to fill whichever
 // device's screen it was on, so the same fractional stroke coordinates
 // drew a different shape (circle vs. ellipse) for each partner. Locking
@@ -88,6 +164,7 @@ export default function DrawScreen() {
     activeTool === 'eraser' ? 'eraser' :
     activeTool === 'text' ? 'text' :
     activeTool === 'select' ? 'select' :
+    activeTool === 'fill' ? 'fill' :
     SHAPE_TOOL_TYPES.includes(activeTool) ? 'shapes' : 'draw';
 
   useEffect(() => {
@@ -331,6 +408,8 @@ export default function DrawScreen() {
         if (!obj.type || obj.type === 'freehand') {
           const pts = obj.points || [];
           for (let i = 1; i < pts.length; i++) drawSegment(obj, pts[i - 1], pts[i]);
+        } else if (obj.type === 'fill') {
+          floodFillAt(ctx, canvas, s, obj.points[0], obj.color);
         } else {
           drawShape(obj);
         }
@@ -395,6 +474,29 @@ export default function DrawScreen() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTool, selectedId]);
 
+  // Per-tool cursor over the canvas — the actual tool's own icon for
+  // freehand/eraser/fill (like Paint's pencil/brush/bucket cursors), a
+  // plain text I-beam for placing text, a plain arrow for Select (the
+  // "basic," unremarkable default for a pick-and-move tool), and crosshair
+  // for the precision shape tools.
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    let cursor = 'crosshair';
+    if (activeTool === 'freehand') {
+      cursor = brushType === 'brush' ? emojiCursor('🖌️') : brushType === 'marker' ? emojiCursor('🖊️') : emojiCursor('✏️');
+    } else if (activeTool === 'eraser') {
+      cursor = emojiCursor('🧹');
+    } else if (activeTool === 'fill') {
+      cursor = emojiCursor('🪣');
+    } else if (activeTool === 'text') {
+      cursor = 'text';
+    } else if (activeTool === 'select') {
+      cursor = 'default';
+    }
+    canvas.style.cursor = cursor;
+  }, [activeTool, brushType]);
+
   // Runs whenever the letterboxed stage box changes size — separate from
   // the socket-setup effect below so the canvas pixel buffer stays in sync
   // with the actual rendered box, not the full (unletterboxed) screen.
@@ -441,6 +543,15 @@ export default function DrawScreen() {
         // discarding the text box before the user can type anything.
         e.preventDefault();
         setTextEditing({ x: cp.x, y: cp.y, value: '' });
+        return;
+      }
+
+      if (tool === 'fill') {
+        const id = crypto.randomUUID();
+        const obj = { id, type: 'fill', color, points: [cp] };
+        eng.strokes[side].push(obj);
+        floodFillAt(ctxRef.current, canvas, side, cp, color); // instant local feedback, no need to wait for a full redraw
+        socket.emit('draw:shape-commit', { id, type: 'fill', color, points: [cp] });
         return;
       }
 
@@ -635,8 +746,12 @@ export default function DrawScreen() {
       eng.strokes[fromSide].push(stroke);
       redrawAll();
     }
-    function onCleared() {
-      eng.strokes = { blue: [], pink: [] };
+    function onCleared({ side: clearedSide } = {}) {
+      if (clearedSide) {
+        eng.strokes[clearedSide] = [];
+      } else {
+        eng.strokes = { blue: [], pink: [] }; // full reset (draw:reset) — no side means both
+      }
       clearStaleSelection();
       redrawAll();
     }
@@ -721,6 +836,9 @@ export default function DrawScreen() {
   function selectSelectCategory() {
     switchTool('select');
   }
+  function selectFillCategory() {
+    switchTool('fill');
+  }
 
   function deleteSelected() {
     const id = engineRef.current.selectedId;
@@ -797,8 +915,13 @@ export default function DrawScreen() {
   }
 
   function handleClear() {
-    if (!window.confirm('Clear the whole drawing for both of you? (not saved)')) return;
+    if (!window.confirm('Clear your half of the drawing? (not saved, only affects your side)')) return;
     socket.emit('draw:clear');
+  }
+
+  function handleReset() {
+    if (!window.confirm("Reset the whole drawing for both of you, including the canvas shape? (not saved)")) return;
+    socket.emit('draw:reset');
   }
 
   return (
@@ -866,6 +989,7 @@ export default function DrawScreen() {
           selectEraserCategory={selectEraserCategory}
           selectTextCategory={selectTextCategory}
           selectSelectCategory={selectSelectCategory}
+          selectFillCategory={selectFillCategory}
           deleteSelected={deleteSelected}
           selectSwatch={selectSwatch}
           handleCustomColor={handleCustomColor}
@@ -881,6 +1005,7 @@ export default function DrawScreen() {
           onUndo={() => socket.emit('draw:undo')}
           onRedo={() => socket.emit('draw:redo')}
           onClear={handleClear}
+          onReset={handleReset}
           onFinish={handleFinish}
         />
       )}
@@ -889,7 +1014,7 @@ export default function DrawScreen() {
         <div className="draw-aspect-overlay">
           <div className="draw-aspect-picker">
             <h2>Choose a canvas shape</h2>
-            <p>Whoever picks first sets it for both of you — it stays fixed until you clear the drawing.</p>
+            <p>Whoever picks first sets it for both of you — it stays fixed until you reset the drawing.</p>
             <div className="draw-aspect-options">
               {ASPECT_PRESETS.map((p) => (
                 <button
