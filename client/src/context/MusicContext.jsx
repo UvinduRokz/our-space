@@ -84,6 +84,27 @@ export function MusicProvider({ children }) {
     localStorage.setItem('music_volume', String(sliderValue));
   }
 
+  // Browsers refuse to autoplay audio until the page has had *some* user
+  // interaction — a deliberate, unavoidable browser policy, not something
+  // any app code can override. But by the time our own login flow gets
+  // around to calling audio.play() (after the verify request, the socket
+  // connecting, and the first state sync), the click that started it all
+  // may no longer count as "recent enough" in some browsers' eyes. Priming
+  // playback on the very first pointerdown anywhere — before any of that
+  // async chain — gives the browser the earliest, most legitimate gesture
+  // to hang its autoplay allowance on, so the "tap to sync" fallback below
+  // is only needed on the genuine edge cases, not routinely.
+  useEffect(() => {
+    function primeOnce() {
+      const audio = audioRef.current;
+      if (!audio) return;
+      const p = audio.play();
+      if (p && p.catch) p.catch(() => {}); // just priming — real playback is driven by server state separately
+    }
+    document.addEventListener('pointerdown', primeOnce, { once: true });
+    return () => document.removeEventListener('pointerdown', primeOnce);
+  }, []);
+
   // Socket wiring: kept deliberately dumb — just captures state into React
   // state. The actual audio.src/currentTime/play/pause work happens in the
   // effect below instead of here, on purpose (see its comment).
