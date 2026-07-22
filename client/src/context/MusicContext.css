@@ -1,0 +1,9 @@
+.music-sync-prompt {
+  position: fixed;
+  bottom: max(20px, env(safe-area-inset-bottom));
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 55;
+  padding: 10px 18px;
+  border-radius: 999px;
+}

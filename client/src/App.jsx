@@ -1,5 +1,6 @@
 import { AppProvider, useApp } from './context/AppContext.jsx';
 import { ToastProvider } from './context/ToastContext.jsx';
+import { MusicProvider } from './context/MusicContext.jsx';
 import GateScreen from './screens/GateScreen.jsx';
 import MainScreen from './screens/MainScreen.jsx';
 import ActivitiesScreen from './screens/ActivitiesScreen.jsx';
@@ -9,6 +10,7 @@ import GalleryScreen from './screens/GalleryScreen.jsx';
 import WordleScreen from './screens/WordleScreen.jsx';
 import HuntScreen from './screens/HuntScreen.jsx';
 import DrawScreen from './screens/DrawScreen.jsx';
+import MusicScreen from './screens/MusicScreen.jsx';
 import BackButton from './components/BackButton.jsx';
 
 // Screens not built yet (later phases) get a placeholder instead of a
@@ -34,7 +36,7 @@ const SCREENS = {
   'game-wordle': WordleScreen,
   'game-hunt': HuntScreen,
   'game-draw': DrawScreen,
-  music: () => <ComingSoon label="Music" backTo="main" />,
+  music: MusicScreen,
 };
 
 function Shell() {
@@ -72,9 +74,11 @@ function Shell() {
 export default function App() {
   return (
     <AppProvider>
-      <ToastProvider>
-        <Shell />
-      </ToastProvider>
+      <MusicProvider>
+        <ToastProvider>
+          <Shell />
+        </ToastProvider>
+      </MusicProvider>
     </AppProvider>
   );
 }
