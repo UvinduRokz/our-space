@@ -451,6 +451,18 @@ function sanitizeWidth(width) {
   const n = Number(width);
   return Number.isFinite(n) ? Math.min(Math.max(n, 1), 40) : 4;
 }
+const DASH_STYLES = ['solid', 'dashed', 'dotted'];
+function sanitizeDash(dash) {
+  return DASH_STYLES.includes(dash) ? dash : 'solid';
+}
+const SHAPE_TYPES = ['line', 'rect', 'ellipse', 'arrow', 'text'];
+function sanitizeText(text) {
+  return typeof text === 'string' ? text.slice(0, 200) : '';
+}
+function sanitizeFontSize(size) {
+  const n = Number(size);
+  return Number.isFinite(n) ? Math.min(Math.max(n, 10), 72) : 24;
+}
 
 // ---- Music Together: synced shared playback ----
 // The server is the single source of truth for what's playing and where —
@@ -672,13 +684,15 @@ io.on('connection', (socket) => {
     const p = clampDrawPoint(socket.side, { x: Number(data && data.x) || 0, y: Number(data && data.y) || 0 });
     const color = sanitizeColor(data && data.color);
     const width = sanitizeWidth(data && data.width);
+    const dash = sanitizeDash(data && data.dash);
     const erase = !!(data && data.erase);
+    const id = crypto.randomUUID();
     const strokes = drawState[socket.side];
-    strokes.push({ color, width, erase, points: [p] });
+    strokes.push({ id, type: 'freehand', color, width, dash, erase, points: [p] });
     if (strokes.length > MAX_STROKES_PER_SIDE) strokes.shift();
     drawRedoStack[socket.side] = []; // a new stroke invalidates old redo history
     const otherSide = SIDES.find((s) => s !== socket.side);
-    if (isOnline(otherSide)) io.to(otherSide).emit('draw:stroke-start', { side: socket.side, point: p, color, width, erase });
+    if (isOnline(otherSide)) io.to(otherSide).emit('draw:stroke-start', { side: socket.side, id, point: p, color, width, dash, erase });
   });
 
   socket.on('draw:stroke-points', (data) => {
@@ -708,6 +722,63 @@ io.on('connection', (socket) => {
     const stroke = redo.pop();
     drawState[socket.side].push(stroke);
     io.emit('draw:redo', { side: socket.side, stroke });
+  });
+
+  // One-shot commit for shape tools (line/rect/ellipse/arrow/text) — unlike
+  // freehand, these aren't streamed point-by-point, so they arrive as a
+  // single fully-formed object.
+  socket.on('draw:shape-commit', (data) => {
+    const type = data && data.type;
+    if (!SHAPE_TYPES.includes(type)) return;
+    const rawPoints = Array.isArray(data && data.points) ? data.points : [];
+    const expectedCount = type === 'text' ? 1 : 2;
+    if (rawPoints.length !== expectedCount) return;
+    const points = rawPoints.map((p) => clampDrawPoint(socket.side, { x: Number(p.x) || 0, y: Number(p.y) || 0 }));
+    const id = crypto.randomUUID();
+    const obj = {
+      id,
+      type,
+      color: sanitizeColor(data && data.color),
+      width: sanitizeWidth(data && data.width),
+      dash: sanitizeDash(data && data.dash),
+      points,
+    };
+    if (type === 'rect' || type === 'ellipse') obj.filled = !!(data && data.filled);
+    if (type === 'text') {
+      obj.text = sanitizeText(data && data.text);
+      obj.fontSize = sanitizeFontSize(data && data.fontSize);
+      if (!obj.text) return; // nothing worth committing
+    }
+    const strokes = drawState[socket.side];
+    strokes.push(obj);
+    if (strokes.length > MAX_STROKES_PER_SIDE) strokes.shift();
+    drawRedoStack[socket.side] = [];
+    const otherSide = SIDES.find((s) => s !== socket.side);
+    if (isOnline(otherSide)) io.to(otherSide).emit('draw:shape-commit', { side: socket.side, object: obj });
+  });
+
+  // Searching only drawState[socket.side] is itself the ownership check —
+  // each side's bucket only ever contains objects that side created, so an
+  // id belonging to the partner's objects simply won't be found here.
+  socket.on('draw:object-move', (data) => {
+    const strokes = drawState[socket.side];
+    const obj = strokes.find((s) => s.id === (data && data.id));
+    if (!obj) return;
+    const rawPoints = Array.isArray(data && data.points) ? data.points : [];
+    const expectedCount = obj.type === 'text' ? 1 : 2;
+    if (rawPoints.length !== expectedCount) return;
+    obj.points = rawPoints.map((p) => clampDrawPoint(socket.side, { x: Number(p.x) || 0, y: Number(p.y) || 0 }));
+    const otherSide = SIDES.find((s) => s !== socket.side);
+    if (isOnline(otherSide)) io.to(otherSide).emit('draw:object-move', { side: socket.side, id: obj.id, points: obj.points });
+  });
+
+  socket.on('draw:object-delete', (data) => {
+    const strokes = drawState[socket.side];
+    const index = strokes.findIndex((s) => s.id === (data && data.id));
+    if (index === -1) return;
+    const [removed] = strokes.splice(index, 1);
+    const otherSide = SIDES.find((s) => s !== socket.side);
+    if (isOnline(otherSide)) io.to(otherSide).emit('draw:object-delete', { side: socket.side, id: removed.id });
   });
 
   socket.on('draw:clear', () => {
