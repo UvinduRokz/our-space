@@ -6,6 +6,8 @@ import ActivitiesScreen from './screens/ActivitiesScreen.jsx';
 import ProfileScreen from './screens/ProfileScreen.jsx';
 import HistoryScreen from './screens/HistoryScreen.jsx';
 import GalleryScreen from './screens/GalleryScreen.jsx';
+import WordleScreen from './screens/WordleScreen.jsx';
+import HuntScreen from './screens/HuntScreen.jsx';
 import BackButton from './components/BackButton.jsx';
 
 // Screens not built yet (later phases) get a placeholder instead of a
@@ -28,8 +30,8 @@ const SCREENS = {
   profile: ProfileScreen,
   history: HistoryScreen,
   gallery: GalleryScreen,
-  'game-wordle': () => <ComingSoon label="Wordle Together" backTo="activities" />,
-  'game-hunt': () => <ComingSoon label="Letter Hunt" backTo="activities" />,
+  'game-wordle': WordleScreen,
+  'game-hunt': HuntScreen,
   'game-draw': () => <ComingSoon label="Draw Together" backTo="activities" />,
   music: () => <ComingSoon label="Music" backTo="main" />,
 };

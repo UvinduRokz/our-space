@@ -1,0 +1,77 @@
+.hunt-letters {
+  display: flex;
+  gap: 8px;
+  margin: 14px 0;
+}
+.hunt-letter {
+  width: 44px;
+  height: 44px;
+  border-radius: 10px;
+  background: linear-gradient(135deg, var(--blue), var(--pink));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.2rem;
+  text-transform: uppercase;
+}
+
+.hunt-form {
+  display: flex;
+  gap: 8px;
+  width: 100%;
+  max-width: 280px;
+}
+.hunt-form input {
+  margin-top: 0;
+  flex: 1;
+}
+
+.hunt-progress {
+  margin-top: 14px;
+  font-size: 0.85rem;
+  opacity: 0.7;
+}
+
+.hunt-found {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0;
+  width: 100%;
+  max-width: 280px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: center;
+}
+.hunt-found li {
+  padding: 5px 10px;
+  border-radius: 999px;
+  font-size: 0.8rem;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+}
+.hunt-found li.side-blue {
+  border-color: var(--blue);
+}
+.hunt-found li.side-pink {
+  border-color: var(--pink);
+}
+
+.waiting-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  text-align: center;
+  background: rgba(10, 8, 20, 0.8);
+  backdrop-filter: blur(4px);
+}
+.waiting-overlay p {
+  max-width: 260px;
+  font-size: 0.95rem;
+  opacity: 0.9;
+}

@@ -1,0 +1,68 @@
+.game-status {
+  min-height: 1.2em;
+  font-size: 0.85rem;
+}
+.game-text-input {
+  margin-top: 18px;
+  width: 100%;
+  max-width: 260px;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  font-weight: 700;
+}
+
+.wordle-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 6px;
+  margin-top: 12px;
+  width: 100%;
+  max-width: 260px;
+}
+.wordle-tile {
+  aspect-ratio: 1;
+  border-radius: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.25);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-weight: 700;
+  font-size: 1.2rem;
+  text-transform: uppercase;
+  background: rgba(255, 255, 255, 0.05);
+}
+.wordle-tile.typing {
+  border-color: rgba(255, 255, 255, 0.6);
+}
+.wordle-tile.correct {
+  background: #4caf6d;
+  border-color: #4caf6d;
+}
+.wordle-tile.present {
+  background: #d3b23c;
+  border-color: #d3b23c;
+}
+.wordle-tile.absent {
+  background: rgba(255, 255, 255, 0.08);
+  border-color: transparent;
+  opacity: 0.6;
+}
+
+.waiting-overlay {
+  position: absolute;
+  inset: 0;
+  z-index: 15;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 40px;
+  text-align: center;
+  background: rgba(10, 8, 20, 0.8);
+  backdrop-filter: blur(4px);
+}
+.waiting-overlay p {
+  max-width: 260px;
+  font-size: 0.95rem;
+  opacity: 0.9;
+}
