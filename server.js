@@ -147,7 +147,10 @@ const musicUpload = multer({
 });
 
 const app = express();
-app.use(express.json({ limit: '5mb' })); // saved drawings are base64 PNGs
+// 150mb to comfortably fit an /api/admin/restore payload (uploaded music
+// files embedded as base64) — MAX_DRAWING_BYTES/MAX_MUSIC_BYTES below are
+// the real per-item caps, enforced independently of this parser limit.
+app.use(express.json({ limit: '150mb' }));
 app.use('/music', express.static(path.join(__dirname, 'public', 'music')));
 app.use('/drawings', express.static(path.join(__dirname, 'public', 'drawings')));
 app.use('/cursors', express.static(path.join(__dirname, 'public', 'cursors')));
@@ -335,6 +338,82 @@ app.delete('/api/playlists/:id', requireAuth, (req, res) => {
     musicState.activePlaylistId = null;
     io.emit('music:state', publicMusicState());
   }
+  res.json({ ok: true });
+});
+
+// Everything below persists only to local JSON files + public/drawings and
+// public/music — fine for two people, but fatal on a host with an ephemeral
+// filesystem (e.g. Render's free tier resets the disk on every redeploy).
+// These two routes let you pull a full snapshot down before a redeploy and
+// push it back afterward, gated the same way as every other /api route
+// (requireAuth — this app's whole security model is "knows one of the two
+// names", so a bespoke secret here would be inconsistent, not more secure).
+function readFileB64(dir, filename) {
+  try {
+    return fs.readFileSync(path.join(dir, filename)).toString('base64');
+  } catch {
+    return null;
+  }
+}
+
+app.get('/api/admin/backup', requireAuth, (req, res) => {
+  const drawingsManifest = loadDrawings();
+  // Built-in ambient tracks are regenerated fresh on every boot by
+  // ensureBuiltinTracks() — backing them up would just be dead weight.
+  const musicManifest = loadMusic().filter((t) => !t.builtin);
+  res.json({
+    exportedAt: new Date().toISOString(),
+    subscriptions: loadSubs(),
+    profiles: loadProfiles(),
+    history: loadHistory(),
+    playlists: loadPlaylists(),
+    drawings: {
+      manifest: drawingsManifest,
+      files: Object.fromEntries(
+        drawingsManifest
+          .map((d) => [d.filename, readFileB64(DRAWINGS_DIR, d.filename)])
+          .filter(([, b64]) => b64)
+      ),
+    },
+    music: {
+      manifest: musicManifest,
+      files: Object.fromEntries(
+        musicManifest
+          .map((t) => [t.filename, readFileB64(MUSIC_DIR, t.filename)])
+          .filter(([, b64]) => b64)
+      ),
+    },
+  });
+});
+
+app.post('/api/admin/restore', requireAuth, (req, res) => {
+  const data = req.body || {};
+  if (data.subscriptions) saveSubs(data.subscriptions);
+  if (data.profiles) saveProfiles(data.profiles);
+  if (Array.isArray(data.history)) fs.writeFileSync(HISTORY_FILE, JSON.stringify(data.history, null, 2));
+  if (Array.isArray(data.playlists)) savePlaylists(data.playlists);
+
+  if (data.drawings) {
+    fs.mkdirSync(DRAWINGS_DIR, { recursive: true });
+    for (const [filename, b64] of Object.entries(data.drawings.files || {})) {
+      fs.writeFileSync(path.join(DRAWINGS_DIR, filename), Buffer.from(b64, 'base64'));
+    }
+    if (Array.isArray(data.drawings.manifest)) saveDrawings(data.drawings.manifest);
+  }
+
+  if (data.music && Array.isArray(data.music.manifest)) {
+    fs.mkdirSync(MUSIC_DIR, { recursive: true });
+    for (const [filename, b64] of Object.entries(data.music.files || {})) {
+      fs.writeFileSync(path.join(MUSIC_DIR, filename), Buffer.from(b64, 'base64'));
+    }
+    // This boot's own ensureBuiltinTracks() already regenerated the builtin
+    // entries — keep those and layer the restored (non-builtin) tracks on
+    // top, rather than overwriting the manifest wholesale.
+    const builtins = loadMusic().filter((t) => t.builtin);
+    const restored = data.music.manifest.filter((t) => !builtins.some((b) => b.id === t.id));
+    saveMusic([...builtins, ...restored]);
+  }
+
   res.json({ ok: true });
 });
 
