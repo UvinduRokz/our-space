@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext.jsx';
+import { playSfx } from '../lib/sfx.js';
 import BackButton from '../components/BackButton.jsx';
 import './HuntScreen.css';
 
@@ -15,9 +16,14 @@ export default function HuntScreen() {
   useEffect(() => {
     if (!socket) return;
     function onState(newState) {
-      // SFX cues (found/complete) are wired up in a later phase alongside
-      // the rest of the audio system.
-      setState(newState);
+      // guards against playing sfx on the very first sync when entering
+      // the screen — only react to genuine, newly-arrived changes
+      setState((prevState) => {
+        if (prevState && newState.found.length > prevState.found.length) {
+          playSfx(newState.found.length >= newState.target ? 'complete' : 'found');
+        }
+        return newState;
+      });
       setError('');
     }
     function onInvalid({ reason }) {

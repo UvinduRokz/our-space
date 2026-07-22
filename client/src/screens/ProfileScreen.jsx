@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useApp } from '../context/AppContext.jsx';
+import { isSfxMuted, setSfxMuted as persistSfxMuted } from '../lib/sfx.js';
 import BackButton from '../components/BackButton.jsx';
 import './ProfileScreen.css';
 
@@ -22,7 +23,7 @@ export default function ProfileScreen() {
   const { profile, setProfile, apiPost } = useApp();
   const [nickname, setNickname] = useState(profile.partnerNickname || '');
   const [selectedBear, setSelectedBear] = useState(profile.bear || 'tenderheart-bear');
-  const [sfxMuted, setSfxMuted] = useState(() => localStorage.getItem('sfx_muted') === 'true');
+  const [sfxMuted, setSfxMuted] = useState(() => isSfxMuted());
   const [status, setStatus] = useState('');
   const [statusIsError, setStatusIsError] = useState(false);
 
@@ -33,7 +34,7 @@ export default function ProfileScreen() {
 
   function toggleSfx(checked) {
     setSfxMuted(!checked);
-    localStorage.setItem('sfx_muted', String(!checked));
+    persistSfxMuted(!checked);
   }
 
   async function handleSubmit(e) {

@@ -1,0 +1,9 @@
+{
+  "name": "Thinking of You",
+  "short_name": "ThinkingOfYou",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#1c1440",
+  "theme_color": "#8a5fff",
+  "icons": []
+}

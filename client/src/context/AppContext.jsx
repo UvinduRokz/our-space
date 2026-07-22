@@ -1,5 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useState } from 'react';
 import { io } from 'socket.io-client';
+import { setupPush } from '../lib/push.js';
 
 const AppContext = createContext(null);
 
@@ -38,8 +39,8 @@ async function apiGet(path, name) {
 }
 
 // Mirrors the old public/app.js flow: persisted name/side in localStorage,
-// re-verified on boot; once authenticated, connect the socket and load the
-// profile. Push notification setup is deferred to a later phase.
+// re-verified on boot; once authenticated, connect the socket, load the
+// profile, and set up push notifications.
 export function AppProvider({ children }) {
   const [name, setName] = useState(() => localStorage.getItem('toy_name') || '');
   const [side, setSide] = useState(() => localStorage.getItem('toy_side') || '');
@@ -49,6 +50,14 @@ export function AppProvider({ children }) {
   const [partnerOnline, setPartnerOnline] = useState(null); // null = no presence event received yet
   const [socket, setSocket] = useState(null);
   const [currentScreen, setCurrentScreen] = useState('main');
+  const [vapidPublicKey, setVapidPublicKey] = useState(null);
+
+  useEffect(() => {
+    fetch('/api/config')
+      .then((res) => res.json())
+      .then((cfg) => setVapidPublicKey(cfg.vapidPublicKey || null))
+      .catch((err) => console.warn('[config] failed to load /api/config', err));
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -110,6 +119,11 @@ export function AppProvider({ children }) {
       setSocket(null);
     };
   }, [authStatus, name, side]);
+
+  useEffect(() => {
+    if (authStatus !== 'authenticated' || !vapidPublicKey) return;
+    setupPush(vapidPublicKey, (path, body) => apiPost(path, body, name));
+  }, [authStatus, vapidPublicKey, name]);
 
   // The custom bear cursor: driven by CSS custom properties on the root
   // element so any screen can just `cursor: var(--cursor-idle)` without

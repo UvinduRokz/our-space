@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext.jsx';
+import { playSfx } from '../lib/sfx.js';
 import BackButton from '../components/BackButton.jsx';
 import './WordleScreen.css';
 
@@ -14,10 +15,17 @@ export default function WordleScreen() {
   useEffect(() => {
     if (!socket) return;
     function onState(newState) {
-      // SFX cues (submit/win/lose) are wired up in a later phase alongside
-      // the rest of the audio system — diffing prevState vs newState here
-      // is where that would hook in.
-      setState(newState);
+      // functional update form to reliably diff against the PREVIOUS state
+      // (guards against playing sfx on the very first sync when entering
+      // the screen — only react to genuine, newly-arrived changes)
+      setState((prevState) => {
+        if (prevState) {
+          if (newState.guesses.length > prevState.guesses.length) playSfx('submit');
+          if (prevState.status === 'playing' && newState.status === 'won') playSfx('win');
+          else if (prevState.status === 'playing' && newState.status === 'lost') playSfx('lose');
+        }
+        return newState;
+      });
       setRemoteTyping('');
       setInputValue('');
     }

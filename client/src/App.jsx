@@ -1,6 +1,10 @@
+import { useEffect } from 'react';
 import { AppProvider, useApp } from './context/AppContext.jsx';
-import { ToastProvider } from './context/ToastContext.jsx';
+import { ToastProvider, useToast } from './context/ToastContext.jsx';
 import { MusicProvider } from './context/MusicContext.jsx';
+import { TapFxProvider } from './context/TapFxContext.jsx';
+import { playSfx } from './lib/sfx.js';
+import PartnerLocationPill from './components/PartnerLocationPill.jsx';
 import GateScreen from './screens/GateScreen.jsx';
 import MainScreen from './screens/MainScreen.jsx';
 import ActivitiesScreen from './screens/ActivitiesScreen.jsx';
@@ -11,21 +15,6 @@ import WordleScreen from './screens/WordleScreen.jsx';
 import HuntScreen from './screens/HuntScreen.jsx';
 import DrawScreen from './screens/DrawScreen.jsx';
 import MusicScreen from './screens/MusicScreen.jsx';
-import BackButton from './components/BackButton.jsx';
-
-// Screens not built yet (later phases) get a placeholder instead of a
-// crash if navigated to early. `backTo` matches where each screen's real
-// back button points in the old app — Wordle/Hunt/Draw are reached via
-// Activities, but Music is reached directly from Main.
-function ComingSoon({ label, backTo }) {
-  return (
-    <section className="screen">
-      <BackButton to={backTo} />
-      <h1>{label}</h1>
-      <p>not built yet — coming in a later phase</p>
-    </section>
-  );
-}
 
 const SCREENS = {
   main: MainScreen,
@@ -38,6 +27,27 @@ const SCREENS = {
   'game-draw': DrawScreen,
   music: MusicScreen,
 };
+
+// AppContext and ToastContext are siblings in the provider tree (neither
+// can see the other), but "partner opened the Activities menu" needs both
+// the socket and the toast — this tiny non-visual component sits inside
+// both, purely to bridge that one event.
+function GlobalSocketEvents() {
+  const { socket, profile } = useApp();
+  const showToast = useToast();
+
+  useEffect(() => {
+    if (!socket) return;
+    function onPing() {
+      showToast(`💌 ${profile.partnerNickname} wants to play together!`);
+      playSfx('ping');
+    }
+    socket.on('activity:ping', onPing);
+    return () => socket.off('activity:ping', onPing);
+  }, [socket, showToast, profile.partnerNickname]);
+
+  return null;
+}
 
 function Shell() {
   const { authStatus, currentScreen } = useApp();
@@ -66,6 +76,8 @@ function Shell() {
   return (
     <>
       <div id="bg-split" />
+      <GlobalSocketEvents />
+      <PartnerLocationPill />
       <ScreenComponent />
     </>
   );
@@ -75,9 +87,11 @@ export default function App() {
   return (
     <AppProvider>
       <MusicProvider>
-        <ToastProvider>
-          <Shell />
-        </ToastProvider>
+        <TapFxProvider>
+          <ToastProvider>
+            <Shell />
+          </ToastProvider>
+        </TapFxProvider>
       </MusicProvider>
     </AppProvider>
   );

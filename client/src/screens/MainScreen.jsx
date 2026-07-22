@@ -1,4 +1,5 @@
 import { useApp } from '../context/AppContext.jsx';
+import { useTapFx } from '../context/TapFxContext.jsx';
 import IconButton from '../components/IconButton.jsx';
 import './MainScreen.css';
 
@@ -10,20 +11,26 @@ function statusText(partnerOnline, partnerNickname) {
 
 export default function MainScreen() {
   const { navigateTo, partnerOnline, profile } = useApp();
+  const { sendTap } = useTapFx();
 
+  // Tap-anywhere-on-this-screen sends a heart tap — matches the old app's
+  // click-anywhere behavior, which was global but gated to only act when
+  // the current screen was 'main'; putting the handler directly on this
+  // screen's own root achieves the same scoping for free, since this
+  // component only exists in the DOM while it's the active screen.
   return (
-    <section className="screen main-screen">
+    <section className="screen main-screen" onClick={(e) => sendTap(e.clientX, e.clientY)}>
       <div className="main-left-btns">
         {/* default hitAreaInset (-3px) is already safe for this row's 8px
             gap — see IconButton's doc comment for the math */}
-        <IconButton title="Edit profile" size={40} onClick={() => navigateTo('profile')}>
+        <IconButton title="Edit profile" size={40} onClick={(e) => { e.stopPropagation(); navigateTo('profile'); }}>
           👤
         </IconButton>
-        <IconButton title="Music" size={40} onClick={() => navigateTo('music')}>
+        <IconButton title="Music" size={40} onClick={(e) => { e.stopPropagation(); navigateTo('music'); }}>
           🎵
         </IconButton>
       </div>
-      <button type="button" className="activities-btn" onClick={() => navigateTo('activities')}>
+      <button type="button" className="activities-btn" onClick={(e) => { e.stopPropagation(); navigateTo('activities'); }}>
         Activities
       </button>
 
