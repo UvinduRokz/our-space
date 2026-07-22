@@ -5,6 +5,7 @@
   "main": "server.js",
   "scripts": {
     "start": "node server.js",
+    "build": "cd client && npm run build",
     "genkeys": "web-push generate-vapid-keys"
   },
   "dependencies": {

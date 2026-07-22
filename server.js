@@ -148,7 +148,10 @@ const musicUpload = multer({
 
 const app = express();
 app.use(express.json({ limit: '5mb' })); // saved drawings are base64 PNGs
-app.use(express.static(path.join(__dirname, 'public')));
+app.use('/music', express.static(path.join(__dirname, 'public', 'music')));
+app.use('/drawings', express.static(path.join(__dirname, 'public', 'drawings')));
+app.use('/cursors', express.static(path.join(__dirname, 'public', 'cursors')));
+app.use(express.static(path.join(__dirname, 'client', 'dist')));
 
 function requireAuth(req, res, next) {
   const side = sideForName(req.headers['x-auth-name']);
