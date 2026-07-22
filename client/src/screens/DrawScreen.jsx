@@ -873,7 +873,12 @@ export default function DrawScreen() {
   function selectSwatch(color) {
     if (colorSlot === 'secondary') setSecondColor(color);
     else setCurrentColor(color);
-    setColorPopoverOpen(false);
+    // Deliberately does NOT close the palette — closing after every single
+    // pick meant only the very first color you clicked ever did anything;
+    // trying a second or third color (very natural when comparing shades)
+    // silently landed on nothing, since the palette had already vanished.
+    // Tap the swatch preview button again (or switch tool/category) to
+    // close it once you're done.
   }
 
   function handleCustomColor(e) {

@@ -6,9 +6,28 @@
 .draw-stage-frame {
   position: absolute;
   inset: 0;
+  /* Mobile: room for the collapsed bottom tab bar + utilities row — without
+     this, the letterboxed canvas is centered across the WHOLE screen with
+     no regard for where the toolbar sits, so a tall (portrait) canvas
+     visually AND interactively (clicks land on the toolbar, never reaching
+     the canvas underneath) overlaps its own bottom edge. The panel can
+     still transiently cover more of the canvas while it's open — an
+     accepted trade-off, since you're choosing options right then, not
+     also trying to draw at that exact spot. */
+  bottom: 170px;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+@media (min-width: 900px) {
+  .draw-stage-frame {
+    /* Desktop: room for the toolbar rail + its options panel on the left
+       (16px offset + ~150px rail + 8px gap + up to 400px panel, plus a
+       little buffer), and just the utilities row at the bottom (it still
+       sits bottom-center on desktop, not folded into the left rail). */
+    left: 600px;
+    bottom: 90px;
+  }
 }
 
 .draw-stage {
