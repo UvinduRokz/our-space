@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<title>Thinking of You</title>
+<link rel="manifest" href="/manifest.json" />
+<meta name="theme-color" content="#8a5fff" />
+<link rel="stylesheet" href="/style.css" />
+</head>
+<body>
+
+<div id="bg-split"></div>
+<canvas id="fx-canvas"></canvas>
+<div id="toast"></div>
+<div id="partner-location-pill" class="hidden"></div>
+<audio id="music-audio" preload="auto"></audio>
+<button id="music-sync-prompt" class="hidden">🔊 tap to sync playback</button>
+
+<section id="gate" class="screen">
+  <form id="gate-form">
+    <h1>Thinking of You</h1>
+    <p>What's your name?</p>
+    <input id="gate-input" type="text" autocomplete="off" autocapitalize="words" placeholder="Your name" required />
+    <button type="submit">Enter</button>
+    <p id="gate-error" class="error"></p>
+  </form>
+</section>
+
+<section id="main" class="screen hidden">
+  <div id="main-left-btns">
+    <button id="profile-btn" title="Edit profile">👤</button>
+    <button id="music-btn" title="Music">🎵</button>
+  </div>
+  <button id="activities-btn">Activities</button>
+  <div id="heart-wrap">
+    <svg id="heart" viewBox="0 0 200 180" xmlns="http://www.w3.org/2000/svg">
+      <defs>
+        <linearGradient id="heart-gradient" x1="0" y1="0" x2="1" y2="0">
+          <stop offset="0%" stop-color="var(--blue)" />
+          <stop offset="42%" stop-color="var(--blue)" />
+          <stop offset="58%" stop-color="var(--pink)" />
+          <stop offset="100%" stop-color="var(--pink)" />
+        </linearGradient>
+        <radialGradient id="gloss-gradient" cx="35%" cy="22%" r="55%">
+          <stop offset="0%" stop-color="#ffffff" stop-opacity="0.9" />
+          <stop offset="45%" stop-color="#ffffff" stop-opacity="0.25" />
+          <stop offset="100%" stop-color="#ffffff" stop-opacity="0" />
+        </radialGradient>
+        <linearGradient id="shade-gradient" x1="0" y1="0" x2="0" y2="1">
+          <stop offset="55%" stop-color="#000000" stop-opacity="0" />
+          <stop offset="100%" stop-color="#000000" stop-opacity="0.4" />
+        </linearGradient>
+        <filter id="glow" x="-50%" y="-50%" width="200%" height="200%">
+          <feGaussianBlur stdDeviation="4" result="blur" />
+          <feMerge>
+            <feMergeNode in="blur" />
+            <feMergeNode in="SourceGraphic" />
+          </feMerge>
+        </filter>
+        <clipPath id="heart-clip">
+          <path d="M100,170 C40,120 10,85 10,55 C10,25 32,5 60,5 C80,5 95,17 100,32 C105,17 120,5 140,5 C168,5 190,25 190,55 C190,85 160,120 100,170 Z" />
+        </clipPath>
+      </defs>
+      <path id="heart-path"
+        d="M100,170 C40,120 10,85 10,55 C10,25 32,5 60,5 C80,5 95,17 100,32 C105,17 120,5 140,5 C168,5 190,25 190,55 C190,85 160,120 100,170 Z"
+        fill="url(#heart-gradient)" filter="url(#glow)" />
+      <g clip-path="url(#heart-clip)">
+        <path d="M100,170 C40,120 10,85 10,55 C10,25 32,5 60,5 C80,5 95,17 100,32 C105,17 120,5 140,5 C168,5 190,25 190,55 C190,85 160,120 100,170 Z" fill="url(#shade-gradient)" />
+        <path d="M100,170 C40,120 10,85 10,55 C10,25 32,5 60,5 C80,5 95,17 100,32 C105,17 120,5 140,5 C168,5 190,25 190,55 C190,85 160,120 100,170 Z" fill="url(#gloss-gradient)" />
+      </g>
+    </svg>
+  </div>
+  <p id="status-line">connecting…</p>
+</section>
+
+<section id="activities" class="screen hidden">
+  <button class="back-btn" data-back="main">← Back</button>
+  <h1>Activities</h1>
+  <div id="activity-cards">
+    <button class="activity-card" data-activity="wordle">
+      <span class="activity-icon">🔤</span>
+      <span class="activity-label">Wordle Together</span>
+      <span class="activity-badge hidden">💗 here now</span>
+    </button>
+    <button class="activity-card" data-activity="hunt">
+      <span class="activity-icon">🔎</span>
+      <span class="activity-label">Letter Hunt</span>
+      <span class="activity-badge hidden">💗 here now</span>
+    </button>
+    <button class="activity-card" data-activity="draw">
+      <span class="activity-icon">🎨</span>
+      <span class="activity-label">Draw Together</span>
+      <span class="activity-badge hidden">💗 here now</span>
+    </button>
+    <button class="activity-card" data-activity="history">
+      <span class="activity-icon">📖</span>
+      <span class="activity-label">Our History</span>
+    </button>
+    <button class="activity-card" data-activity="gallery">
+      <span class="activity-icon">🖼️</span>
+      <span class="activity-label">Gallery</span>
+    </button>
+  </div>
+</section>
+
+<section id="game-wordle" class="screen game-screen hidden">
+  <button class="back-btn" data-back="activities">← Back</button>
+  <h1>Wordle Together</h1>
+  <p id="wordle-status" class="game-status">connecting…</p>
+  <div id="wordle-grid"></div>
+  <input id="wordle-input" class="game-text-input" autocomplete="off" autocapitalize="characters" maxlength="5" placeholder="type your guess" />
+  <button id="wordle-new-btn" class="hidden">Play Again</button>
+  <div class="waiting-overlay hidden"><p>waiting for <span class="waiting-nickname">babe</span> to open this page before you can play together…</p></div>
+</section>
+
+<section id="game-hunt" class="screen game-screen hidden">
+  <button class="back-btn" data-back="activities">← Back</button>
+  <h1>Letter Hunt</h1>
+  <p id="hunt-status" class="game-status">find 10 words together</p>
+  <div id="hunt-letters"></div>
+  <form id="hunt-form">
+    <input id="hunt-input" class="game-text-input" autocomplete="off" autocapitalize="characters" placeholder="type a word" />
+    <button type="submit">Add</button>
+  </form>
+  <p id="hunt-error" class="error"></p>
+  <p id="hunt-progress">0 / 10 found</p>
+  <ul id="hunt-found"></ul>
+  <button id="hunt-new-btn">New Letters</button>
+  <div class="waiting-overlay hidden"><p>waiting for <span class="waiting-nickname">babe</span> to open this page before you can play together…</p></div>
+</section>
+
+<section id="game-draw" class="screen game-screen hidden">
+  <div id="draw-backdrop"></div>
+  <canvas id="draw-canvas"></canvas>
+  <div id="draw-guides">
+    <div id="draw-grid-overlay" class="hidden"></div>
+    <div id="draw-divider"></div>
+    <span class="draw-tag draw-tag-left">💙</span>
+    <span class="draw-tag draw-tag-right">💗</span>
+  </div>
+
+  <button class="back-btn" data-back="activities">← Back</button>
+  <p id="draw-status"></p>
+
+  <div id="draw-toolbar">
+    <button id="draw-tool-color" class="draw-tool" title="Color">🎨</button>
+    <button id="draw-tool-size" class="draw-tool" title="Brush size">✏️</button>
+    <button id="draw-tool-eraser" class="draw-tool" title="Eraser">🧹</button>
+    <button id="draw-tool-undo" class="draw-tool" title="Undo">↩️</button>
+    <button id="draw-tool-redo" class="draw-tool" title="Redo">↪️</button>
+    <button id="draw-tool-grid" class="draw-tool" title="Grid">▦</button>
+    <button id="draw-tool-clear" class="draw-tool" title="Clear">🗑️</button>
+    <button id="draw-tool-finish" class="draw-tool draw-tool-primary" title="Finish &amp; Save">✅</button>
+  </div>
+
+  <div id="draw-color-popover" class="draw-popover hidden">
+    <div id="draw-color-swatches"></div>
+    <input id="draw-color-custom" type="color" value="#4f8fff" />
+  </div>
+
+  <div id="draw-size-popover" class="draw-popover hidden">
+    <input id="draw-size-slider" type="range" min="2" max="24" value="4" />
+    <span id="draw-size-value">4px</span>
+  </div>
+
+  <div class="waiting-overlay hidden"><p>waiting for <span class="waiting-nickname">babe</span> to open this page before you can draw together…</p></div>
+</section>
+
+<div id="drawing-reveal" class="framed-modal hidden">
+  <div class="framed-modal-backdrop"></div>
+  <div class="framed-modal-frame">
+    <img id="drawing-reveal-img" alt="your finished drawing" />
+  </div>
+  <button id="drawing-reveal-close" class="framed-modal-close">Close</button>
+</div>
+
+<section id="profile" class="screen hidden">
+  <button class="back-btn" data-back="main">← Back</button>
+  <h1>Profile</h1>
+  <form id="profile-form">
+    <label for="profile-nickname">What do you call your partner?</label>
+    <input id="profile-nickname" type="text" autocomplete="off" maxlength="30" placeholder="babe" />
+    <label id="profile-sfx-label"><input id="profile-sfx-toggle" type="checkbox" checked /> Sound effects on this device</label>
+    <label>Pick your cursor bear</label>
+    <div id="bear-picker">
+      <button type="button" class="bear-option" data-bear="good-luck-bear"><img src="/cursors/good-luck-bear-idle.svg" alt="" /><span class="bear-name">Good Luck Bear</span></button>
+      <button type="button" class="bear-option" data-bear="grumpy-bear"><img src="/cursors/grumpy-bear-idle.svg" alt="" /><span class="bear-name">Grumpy Bear</span></button>
+      <button type="button" class="bear-option" data-bear="share-bear"><img src="/cursors/share-bear-idle.svg" alt="" /><span class="bear-name">Share Bear</span></button>
+      <button type="button" class="bear-option" data-bear="tenderheart-bear"><img src="/cursors/tenderheart-bear-idle.svg" alt="" /><span class="bear-name">Tenderheart Bear</span></button>
+      <button type="button" class="bear-option" data-bear="bedtime-bear"><img src="/cursors/bedtime-bear-idle.svg" alt="" /><span class="bear-name">Bedtime Bear</span></button>
+      <button type="button" class="bear-option" data-bear="cheer-bear"><img src="/cursors/cheer-bear-idle.svg" alt="" /><span class="bear-name">Cheer Bear</span></button>
+      <button type="button" class="bear-option" data-bear="funshine-bear"><img src="/cursors/funshine-bear-idle.svg" alt="" /><span class="bear-name">Funshine Bear</span></button>
+    </div>
+    <button type="submit">Save</button>
+    <p id="profile-saved" class="error" style="color:#8fffb0"></p>
+  </form>
+</section>
+
+<section id="history" class="screen game-screen hidden">
+  <button class="back-btn" data-back="activities">← Back</button>
+  <h1>Our History</h1>
+  <div id="recap-grid"></div>
+  <ul id="history-list"></ul>
+</section>
+
+<section id="gallery" class="screen game-screen hidden">
+  <button class="back-btn" data-back="activities">← Back</button>
+  <h1>Gallery</h1>
+  <div id="gallery-grid"></div>
+</section>
+
+<div id="gallery-lightbox" class="framed-modal hidden">
+  <div class="framed-modal-backdrop"></div>
+  <div class="framed-modal-frame">
+    <img id="gallery-lightbox-img" alt="a saved drawing" />
+  </div>
+  <a id="gallery-lightbox-download" download class="framed-modal-download">Download</a>
+  <button id="gallery-lightbox-close" class="framed-modal-close">Close</button>
+</div>
+
+<section id="music" class="screen game-screen hidden">
+  <button class="back-btn" data-back="main">← Back</button>
+  <h1>Music</h1>
+
+  <div id="music-now-playing">
+    <p id="music-now-title">nothing playing yet</p>
+    <div id="music-controls">
+      <button id="music-prev-btn" title="Previous">⏮️</button>
+      <button id="music-play-btn" title="Play/Pause">▶️</button>
+      <button id="music-next-btn" title="Next">⏭️</button>
+      <button id="music-repeat-btn" title="Repeat">🔂</button>
+    </div>
+    <div id="music-seek-row">
+      <span id="music-time-current">0:00</span>
+      <input id="music-seek-slider" type="range" min="0" max="100" value="0" />
+      <span id="music-time-total">0:00</span>
+    </div>
+    <div id="music-volume-row">
+      <span>🔈</span>
+      <input id="music-volume-slider" type="range" min="0" max="100" value="70" />
+    </div>
+  </div>
+
+  <div id="music-playlists">
+    <div id="music-playlists-header">
+      <h2>Playlists</h2>
+      <button type="button" id="music-playlist-new-btn">+ New Playlist</button>
+    </div>
+    <ul id="music-playlist-list"></ul>
+
+    <div id="music-playlist-builder" class="hidden">
+      <input id="music-playlist-name-input" type="text" autocomplete="off" placeholder="Playlist name" maxlength="60" />
+      <p class="hint">Tap tracks below to add them, in order.</p>
+      <ul id="music-playlist-builder-tracks"></ul>
+      <div id="music-playlist-builder-actions">
+        <button type="button" id="music-playlist-save-btn">Save</button>
+        <button type="button" id="music-playlist-cancel-btn">Cancel</button>
+      </div>
+      <p id="music-playlist-status" class="error"></p>
+    </div>
+  </div>
+
+  <ul id="music-track-list"></ul>
+
+  <form id="music-upload-form">
+    <input id="music-upload-title" type="text" autocomplete="off" placeholder="song title (optional)" maxlength="60" />
+    <input id="music-upload-file" type="file" accept="audio/mpeg,audio/mp3,.mp3" />
+    <button type="submit">Upload MP3</button>
+    <p id="music-upload-status" class="error"></p>
+  </form>
+</section>
+
+<script src="/socket.io/socket.io.js"></script>
+<script src="/particles.js"></script>
+<script src="/app.js"></script>
+<script src="/wordle.js"></script>
+<script src="/hunt.js"></script>
+<script src="/draw.js"></script>
+<script src="/history.js"></script>
+<script src="/gallery.js"></script>
+<script src="/sfx.js"></script>
+<script src="/music.js"></script>
+</body>
+</html>

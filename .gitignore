@@ -1,0 +1,9 @@
+node_modules/
+.env
+subscriptions.json
+profiles.json
+history.json
+drawings.json
+public/drawings/
+music.json
+public/music/
