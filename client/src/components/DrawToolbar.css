@@ -1,0 +1,262 @@
+/* Mobile default: everything anchored bottom-center. `.draw-toolbar-root`
+   is a real flex column-reverse container here, so its two children
+   (utils first in the DOM, tools-group second) stack utils at the very
+   bottom and the tools-group above it — no hardcoded height offsets. At
+   desktop widths it becomes `display: contents` (see below), stepping out
+   of the way so each child can position itself independently instead. */
+.draw-toolbar-root {
+  position: fixed;
+  left: 50%;
+  bottom: max(14px, env(safe-area-inset-bottom));
+  transform: translateX(-50%);
+  z-index: 20;
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 8px;
+  max-width: calc(100vw - 24px);
+}
+@media (min-width: 900px) {
+  .draw-toolbar-root {
+    display: contents;
+  }
+}
+
+.draw-toolbar-utils {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 18px;
+  background: rgba(20, 14, 36, 0.85);
+  backdrop-filter: blur(6px);
+  flex-wrap: wrap;
+  justify-content: center;
+}
+@media (min-width: 900px) {
+  .draw-toolbar-utils {
+    position: fixed;
+    left: 50%;
+    bottom: max(14px, env(safe-area-inset-bottom));
+    transform: translateX(-50%);
+    z-index: 20;
+  }
+}
+
+/* Holds the category tabs + their options panel. Mobile: column-reverse so
+   tabs sit at the bottom of this group and the panel opens above them.
+   Desktop: becomes its own fixed left-center rail, laid out as a row so
+   tabs sit on the left and the panel opens to their right. */
+.draw-tools-group {
+  display: flex;
+  flex-direction: column-reverse;
+  align-items: center;
+  gap: 8px;
+}
+@media (min-width: 900px) {
+  .draw-tools-group {
+    position: fixed;
+    left: 16px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 20;
+    flex-direction: row;
+    align-items: flex-start;
+  }
+}
+
+.draw-toolbar-tabs {
+  display: flex;
+  flex-direction: row;
+  gap: 6px;
+  padding: 8px;
+  border-radius: 18px;
+  background: rgba(20, 14, 36, 0.85);
+  backdrop-filter: blur(6px);
+}
+@media (min-width: 900px) {
+  .draw-toolbar-tabs {
+    flex-direction: column;
+  }
+}
+
+/* Collapsed only matters on mobile — see the max-width:900px block below.
+   Desktop ignores this class entirely so the panel is always visible. */
+.draw-toolbar-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 16px;
+  background: rgba(20, 14, 36, 0.9);
+  backdrop-filter: blur(6px);
+  max-height: 42vh;
+  overflow-y: auto;
+  max-width: min(80vw, 320px);
+}
+@media (max-width: 899px) {
+  .draw-toolbar-panel.collapsed {
+    display: none;
+  }
+}
+@media (min-width: 900px) {
+  .draw-toolbar-panel {
+    max-width: 260px;
+  }
+}
+
+.draw-panel-section {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.draw-panel-label {
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: rgba(255, 255, 255, 0.55);
+  font-weight: 600;
+}
+.draw-panel-controls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+.draw-panel-hint {
+  font-size: 0.75rem;
+  color: rgba(255, 255, 255, 0.6);
+}
+
+/* Icon-over-label (tab bar / tool) or icon-beside-label (desktop rail),
+   controlled by the `--tab` modifier + the same breakpoint as the rail. */
+.draw-labeled-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  flex-direction: column;
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  padding: 6px 8px;
+  min-width: 52px;
+}
+.draw-labeled-btn.active {
+  background: linear-gradient(90deg, var(--blue), var(--pink));
+}
+.draw-labeled-btn-icon {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.draw-labeled-btn-text {
+  font-size: 0.62rem;
+  font-weight: 600;
+  white-space: nowrap;
+}
+@media (min-width: 900px) {
+  .draw-labeled-btn--tab {
+    flex-direction: row;
+    justify-content: flex-start;
+    min-width: 120px;
+  }
+  .draw-labeled-btn--tab .draw-labeled-btn-text {
+    font-size: 0.78rem;
+  }
+}
+
+.draw-tool {
+  width: 42px;
+  height: 42px;
+  flex-shrink: 0;
+  padding: 0;
+  border-radius: 12px;
+  font-size: 1.1rem;
+  background: rgba(255, 255, 255, 0.1);
+}
+.draw-tool.active {
+  background: linear-gradient(90deg, var(--blue), var(--pink));
+}
+.draw-tool-primary {
+  background: linear-gradient(90deg, #4caf6d, #3d9a5c);
+}
+.draw-tool:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.draw-fill-toggle {
+  height: 32px;
+  padding: 0 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  font-size: 0.75rem;
+  font-weight: 600;
+  flex-shrink: 0;
+}
+.draw-fill-toggle.active {
+  background: linear-gradient(90deg, var(--blue), var(--pink));
+}
+
+.draw-color-swatch-btn {
+  width: 32px;
+  height: 32px;
+  border-radius: 8px;
+  border: 2px solid rgba(255, 255, 255, 0.4);
+  padding: 0;
+}
+
+.draw-palette {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.draw-color-swatches {
+  display: grid;
+  grid-template-columns: repeat(10, 1fr);
+  gap: 5px;
+}
+.draw-swatch {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.5);
+  padding: 0;
+}
+.draw-swatch.active {
+  border-color: #fff;
+  transform: scale(1.15);
+}
+.draw-color-custom {
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  border: none;
+  background: none;
+  border-radius: 8px;
+}
+
+.draw-size-value {
+  color: #fff;
+  font-size: 0.8rem;
+  min-width: 32px;
+}
+
+.draw-dash-btn {
+  width: 42px;
+  height: 32px;
+  flex-shrink: 0;
+  padding: 0;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.1);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.draw-dash-btn.active {
+  background: linear-gradient(90deg, var(--blue), var(--pink));
+}
+.draw-dash-preview {
+  width: 24px;
+  height: 0;
+  border-top: 3px solid #fff;
+}

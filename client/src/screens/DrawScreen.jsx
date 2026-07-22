@@ -2,18 +2,10 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext.jsx';
 import BackButton from '../components/BackButton.jsx';
 import Modal from '../components/Modal.jsx';
-import Tooltip from '../components/Tooltip.jsx';
+import DrawToolbar from '../components/DrawToolbar.jsx';
 import './DrawScreen.css';
 
-// A Paint-style 20-swatch palette (two rows of 10) for quick access, instead
-// of just a handful of swatches plus a native color picker as the only options.
-const PALETTE = [
-  '#000000', '#7f7f7f', '#880015', '#ed1c24', '#ff7f27', '#fff200', '#22b14c', '#00a2e8', '#3f48cc', '#a349a4',
-  '#ffffff', '#c3c3c3', '#b97a57', '#ffaec9', '#ffc90e', '#efe4b0', '#b5e61d', '#99d9ea', '#7092be', '#c8bfe7',
-];
 const SHAPE_TOOL_TYPES = ['line', 'rect', 'ellipse', 'arrow'];
-const DASH_STYLES = ['solid', 'dashed', 'dotted'];
-const BRUSH_TYPES = ['pencil', 'brush', 'marker'];
 
 function distToSegment(p, a, b) {
   const dx = b.x - a.x;
@@ -74,10 +66,7 @@ export default function DrawScreen() {
   const [gradientOn, setGradientOn] = useState(false);
   const [colorSlot, setColorSlot] = useState('primary'); // which swatch the color popover is currently editing
   const [colorPopoverOpen, setColorPopoverOpen] = useState(false);
-  const [sizePopoverOpen, setSizePopoverOpen] = useState(false);
-  const [dashPopoverOpen, setDashPopoverOpen] = useState(false);
   const [fontSize, setFontSize] = useState(24);
-  const [fontSizePopoverOpen, setFontSizePopoverOpen] = useState(false);
   const [textEditing, setTextEditing] = useState(null); // { x, y (fractional canvas point), value } while placing a text object
   const [selectedId, setSelectedId] = useState(null); // mirrors engineRef.current.selectedId, for UI only (delete button, keyboard shortcut)
   const [gridVisible, setGridVisible] = useState(false);
@@ -690,9 +679,6 @@ export default function DrawScreen() {
   function switchTool(tool) {
     setActiveTool(tool);
     setColorPopoverOpen(false);
-    setSizePopoverOpen(false);
-    setDashPopoverOpen(false);
-    setFontSizePopoverOpen(false);
     commitText();
     engineRef.current.selectedId = null;
     engineRef.current.dragStartPoint = null;
@@ -763,39 +749,11 @@ export default function DrawScreen() {
 
   function openColorPopoverFor(slot) {
     setColorSlot(slot);
-    setSizePopoverOpen(false);
-    setDashPopoverOpen(false);
-    setFontSizePopoverOpen(false);
     setColorPopoverOpen(true);
   }
 
   function toggleColorPopover() {
-    setSizePopoverOpen(false);
-    setDashPopoverOpen(false);
-    setFontSizePopoverOpen(false);
-    setColorSlot('primary');
     setColorPopoverOpen((v) => !v);
-  }
-
-  function toggleSizePopover() {
-    setColorPopoverOpen(false);
-    setDashPopoverOpen(false);
-    setFontSizePopoverOpen(false);
-    setSizePopoverOpen((v) => !v);
-  }
-
-  function toggleDashPopover() {
-    setColorPopoverOpen(false);
-    setSizePopoverOpen(false);
-    setFontSizePopoverOpen(false);
-    setDashPopoverOpen((v) => !v);
-  }
-
-  function toggleFontSizePopover() {
-    setColorPopoverOpen(false);
-    setSizePopoverOpen(false);
-    setDashPopoverOpen(false);
-    setFontSizePopoverOpen((v) => !v);
   }
 
   async function handleFinish() {
@@ -870,185 +828,44 @@ export default function DrawScreen() {
       <BackButton to="activities" />
       <p className={`draw-status${status.show ? ' show' : ''}`}>{status.text}</p>
 
-      <div className="draw-toolbar-stack">
-        <div className="draw-toolbar-row">
-          <Tooltip text="Undo last stroke">
-            <button type="button" className="draw-tool" onClick={() => socket.emit('draw:undo')}>↩️</button>
-          </Tooltip>
-          <Tooltip text="Redo">
-            <button type="button" className="draw-tool" onClick={() => socket.emit('draw:redo')}>↪️</button>
-          </Tooltip>
-          <Tooltip text={gridVisible ? 'Hide grid' : 'Show grid'}>
-            <button type="button" className={`draw-tool${gridVisible ? ' active' : ''}`} onClick={() => setGridVisible((v) => !v)}>▦</button>
-          </Tooltip>
-          <Tooltip text="Clear the whole drawing">
-            <button type="button" className="draw-tool" onClick={handleClear}>🗑️</button>
-          </Tooltip>
-          <Tooltip text="Finish & save this drawing">
-            <button type="button" className="draw-tool draw-tool-primary" onClick={handleFinish}>✅</button>
-          </Tooltip>
-        </div>
-
-        <div className="draw-toolbar-row">
-          <Tooltip text="Draw">
-            <button type="button" className={`draw-tool${activeCategory === 'draw' ? ' active' : ''}`} onClick={selectDrawCategory}>✏️</button>
-          </Tooltip>
-          <Tooltip text="Shapes">
-            <button type="button" className={`draw-tool${activeCategory === 'shapes' ? ' active' : ''}`} onClick={selectShapesCategory}>📐</button>
-          </Tooltip>
-          <Tooltip text="Text">
-            <button type="button" className={`draw-tool${activeCategory === 'text' ? ' active' : ''}`} onClick={selectTextCategory}>🔤</button>
-          </Tooltip>
-          <Tooltip text="Eraser">
-            <button type="button" className={`draw-tool${activeCategory === 'eraser' ? ' active' : ''}`} onClick={selectEraserCategory}>🧹</button>
-          </Tooltip>
-          <Tooltip text="Select">
-            <button type="button" className={`draw-tool${activeCategory === 'select' ? ' active' : ''}`} onClick={selectSelectCategory}>🖱️</button>
-          </Tooltip>
-        </div>
-
-        {activeCategory === 'select' && (
-          <div className="draw-toolbar-row">
-            <Tooltip text={selectedId ? 'Delete selected object' : 'Tap an object on your half to select it'}>
-              <button type="button" className="draw-tool" disabled={!selectedId} onClick={deleteSelected}>❌</button>
-            </Tooltip>
-          </div>
-        )}
-
-        {activeCategory === 'shapes' && (
-          <div className="draw-toolbar-row">
-            <Tooltip text="Line">
-              <button type="button" className={`draw-tool${activeTool === 'line' ? ' active' : ''}`} onClick={() => selectShapeType('line')}>╱</button>
-            </Tooltip>
-            <Tooltip text="Rectangle">
-              <button type="button" className={`draw-tool${activeTool === 'rect' ? ' active' : ''}`} onClick={() => selectShapeType('rect')}>▭</button>
-            </Tooltip>
-            <Tooltip text="Ellipse">
-              <button type="button" className={`draw-tool${activeTool === 'ellipse' ? ' active' : ''}`} onClick={() => selectShapeType('ellipse')}>◯</button>
-            </Tooltip>
-            <Tooltip text="Arrow">
-              <button type="button" className={`draw-tool${activeTool === 'arrow' ? ' active' : ''}`} onClick={() => selectShapeType('arrow')}>➚</button>
-            </Tooltip>
-            {(activeTool === 'rect' || activeTool === 'ellipse') && (
-              <Tooltip text={filled ? 'Filled shape' : 'Outline only'}>
-                <button type="button" className={`draw-fill-toggle${filled ? ' active' : ''}`} onClick={() => setFilled((v) => !v)}>
-                  {filled ? 'Filled' : 'Outline'}
-                </button>
-              </Tooltip>
-            )}
-          </div>
-        )}
-
-        {(activeCategory === 'draw' || activeCategory === 'shapes') && (
-          <div className="draw-toolbar-row">
-            <Tooltip text="Pencil (hard edge)">
-              <button type="button" className={`draw-tool${brushType === 'pencil' ? ' active' : ''}`} onClick={() => setBrushType('pencil')}>✎</button>
-            </Tooltip>
-            <Tooltip text="Brush (soft edge)">
-              <button type="button" className={`draw-tool${brushType === 'brush' ? ' active' : ''}`} onClick={() => setBrushType('brush')}>🖌️</button>
-            </Tooltip>
-            <Tooltip text="Marker (translucent)">
-              <button type="button" className={`draw-tool${brushType === 'marker' ? ' active' : ''}`} onClick={() => setBrushType('marker')}>🖊️</button>
-            </Tooltip>
-          </div>
-        )}
-
-        {(activeCategory === 'draw' || activeCategory === 'shapes') && (
-          <div className="draw-toolbar-row">
-            <Tooltip text="Primary color">
-              <button type="button" className="draw-tool draw-color-preview" style={{ background: currentColor }} onClick={() => openColorPopoverFor('primary')} />
-            </Tooltip>
-            <Tooltip text={gradientOn ? 'Gradient (on)' : 'Gradient color'}>
-              <button type="button" className={`draw-tool${gradientOn ? ' active' : ''}`} onClick={() => setGradientOn((v) => !v)}>🌈</button>
-            </Tooltip>
-            {gradientOn && (
-              <Tooltip text="Secondary color">
-                <button type="button" className="draw-tool draw-color-preview" style={{ background: secondColor }} onClick={() => openColorPopoverFor('secondary')} />
-              </Tooltip>
-            )}
-            <Tooltip text="Brush size">
-              <button type="button" className="draw-tool" onClick={toggleSizePopover}>📏</button>
-            </Tooltip>
-            <Tooltip text="Line style">
-              <button type="button" className="draw-tool" onClick={toggleDashPopover}>┅</button>
-            </Tooltip>
-          </div>
-        )}
-
-        {activeCategory === 'text' && (
-          <div className="draw-toolbar-row">
-            <Tooltip text="Text color">
-              <button type="button" className="draw-tool draw-color-preview" style={{ background: currentColor }} onClick={() => openColorPopoverFor('primary')} />
-            </Tooltip>
-            <Tooltip text="Font size">
-              <button type="button" className="draw-tool" onClick={toggleFontSizePopover}>🔠</button>
-            </Tooltip>
-          </div>
-        )}
-
-        {activeCategory === 'eraser' && (
-          <div className="draw-toolbar-row">
-            <Tooltip text="Eraser size">
-              <button type="button" className="draw-tool" onClick={toggleSizePopover}>📏</button>
-            </Tooltip>
-          </div>
-        )}
-
-        {colorPopoverOpen && (activeCategory === 'draw' || activeCategory === 'shapes' || activeCategory === 'text') && (
-          <div className="draw-popover draw-popover-palette">
-            <div className="draw-color-swatches">
-              {PALETTE.map((color) => (
-                <button
-                  type="button"
-                  key={color}
-                  className={`draw-swatch${color === (colorSlot === 'secondary' ? secondColor : currentColor) ? ' active' : ''}`}
-                  style={{ background: color }}
-                  onClick={() => selectSwatch(color)}
-                />
-              ))}
-            </div>
-            <input
-              type="color"
-              className="draw-color-custom"
-              value={colorSlot === 'secondary' ? secondColor : currentColor}
-              onChange={handleCustomColor}
-            />
-          </div>
-        )}
-
-        {sizePopoverOpen && (
-          <div className="draw-popover">
-            <input type="range" min="2" max="24" value={currentWidth} onChange={(e) => setCurrentWidth(Number(e.target.value))} />
-            <span className="draw-size-value">{currentWidth}px</span>
-          </div>
-        )}
-
-        {fontSizePopoverOpen && (
-          <div className="draw-popover">
-            <input type="range" min="10" max="72" value={fontSize} onChange={(e) => setFontSize(Number(e.target.value))} />
-            <span className="draw-size-value">{fontSize}px</span>
-          </div>
-        )}
-
-        {dashPopoverOpen && (activeCategory === 'draw' || activeCategory === 'shapes') && (
-          <div className="draw-popover">
-            {DASH_STYLES.map((d) => (
-              <Tooltip text={d} key={d}>
-                <button
-                  type="button"
-                  className={`draw-dash-btn${currentDash === d ? ' active' : ''}`}
-                  onClick={() => {
-                    setCurrentDash(d);
-                    setDashPopoverOpen(false);
-                  }}
-                >
-                  <span className="draw-dash-preview" style={{ borderTopStyle: d }} />
-                </button>
-              </Tooltip>
-            ))}
-          </div>
-        )}
-      </div>
+      <DrawToolbar
+        activeCategory={activeCategory}
+        activeTool={activeTool}
+        currentColor={currentColor}
+        secondColor={secondColor}
+        colorSlot={colorSlot}
+        colorPopoverOpen={colorPopoverOpen}
+        currentWidth={currentWidth}
+        currentDash={currentDash}
+        filled={filled}
+        brushType={brushType}
+        gradientOn={gradientOn}
+        fontSize={fontSize}
+        selectedId={selectedId}
+        gridVisible={gridVisible}
+        selectDrawCategory={selectDrawCategory}
+        selectShapesCategory={selectShapesCategory}
+        selectShapeType={selectShapeType}
+        selectEraserCategory={selectEraserCategory}
+        selectTextCategory={selectTextCategory}
+        selectSelectCategory={selectSelectCategory}
+        deleteSelected={deleteSelected}
+        selectSwatch={selectSwatch}
+        handleCustomColor={handleCustomColor}
+        openColorPopoverFor={openColorPopoverFor}
+        toggleColorPopover={toggleColorPopover}
+        setFilled={setFilled}
+        setGradientOn={setGradientOn}
+        setBrushType={setBrushType}
+        setCurrentDash={setCurrentDash}
+        setCurrentWidth={setCurrentWidth}
+        setFontSize={setFontSize}
+        setGridVisible={setGridVisible}
+        onUndo={() => socket.emit('draw:undo')}
+        onRedo={() => socket.emit('draw:redo')}
+        onClear={handleClear}
+        onFinish={handleFinish}
+      />
 
       {!partnerHere && (
         <div className="waiting-overlay">
