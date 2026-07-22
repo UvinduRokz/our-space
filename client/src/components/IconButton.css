@@ -38,3 +38,19 @@
 .icon-btn.active {
   background: rgba(255, 95, 168, 0.3);
 }
+
+/* Repeat modes need to be tellable apart at a glance, not just by a subtle
+   emoji difference (🔂 vs 🔁 render nearly identically at 44px in a lot of
+   fonts) — color is the primary signal here, icon is secondary. */
+.icon-btn--repeat-off {
+  background: rgba(255, 255, 255, 0.12);
+  opacity: 0.5;
+}
+.icon-btn--repeat-track {
+  background: rgba(79, 143, 255, 0.4);
+  opacity: 1;
+}
+.icon-btn--repeat-playlist {
+  background: rgba(255, 95, 168, 0.4);
+  opacity: 1;
+}

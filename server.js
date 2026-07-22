@@ -273,7 +273,23 @@ app.post('/api/music/upload', requireAuth, (req, res) => {
 });
 
 app.get('/api/playlists', requireAuth, (req, res) => {
-  res.json(loadPlaylists().sort((a, b) => a.ts - b.ts));
+  // stored array order IS the display/play order (reorderable via
+  // /api/playlists/reorder below) — no longer forced to creation-time order
+  res.json(loadPlaylists());
+});
+
+app.post('/api/playlists/reorder', requireAuth, (req, res) => {
+  const orderedIds = Array.isArray(req.body && req.body.orderedIds) ? req.body.orderedIds : [];
+  const playlists = loadPlaylists();
+  const byId = new Map(playlists.map((p) => [p.id, p]));
+  const reordered = orderedIds.map((id) => byId.get(id)).filter(Boolean);
+  // anything the client didn't mention (e.g. created by the partner in the
+  // same instant) stays present, appended at the end, rather than dropped
+  const missing = playlists.filter((p) => !orderedIds.includes(p.id));
+  const next = [...reordered, ...missing];
+  savePlaylists(next);
+  io.emit('music:playlists', next);
+  res.json(next);
 });
 
 app.post('/api/playlists', requireAuth, (req, res) => {

@@ -90,6 +90,15 @@ export default function MusicScreen() {
     setBuilderTrackIds((ids) => ids.filter((_, i) => i !== index));
   }
 
+  function reorderBuilderTrack(fromIndex, toIndex) {
+    setBuilderTrackIds((ids) => {
+      const next = [...ids];
+      const [moved] = next.splice(fromIndex, 1);
+      next.splice(toIndex, 0, moved);
+      return next;
+    });
+  }
+
   async function savePlaylist() {
     const trimmedName = builderName.trim();
     if (!trimmedName) {
@@ -122,6 +131,14 @@ export default function MusicScreen() {
 
   async function deletePlaylist(id) {
     await fetch(`/api/playlists/${id}`, { method: 'DELETE', headers: { 'x-auth-name': name } });
+  }
+
+  async function reorderPlaylists(fromIndex, toIndex) {
+    const next = [...playlists];
+    const [moved] = next.splice(fromIndex, 1);
+    next.splice(toIndex, 0, moved);
+    await apiPost('/api/playlists/reorder', { orderedIds: next.map((p) => p.id) });
+    // server broadcasts music:playlists back to everyone including us
   }
 
   async function handleUpload(e) {
@@ -165,8 +182,8 @@ export default function MusicScreen() {
           </IconButton>
           <IconButton title="Next" onClick={next}>⏭️</IconButton>
           <IconButton
-            title={repeatMode === 'off' ? 'Repeat: off' : repeatMode === 'track' ? 'Repeat: this track' : 'Repeat: whole playlist'}
-            active={repeatMode !== 'off'}
+            title={repeatMode === 'off' ? 'Repeat: off (tap to repeat this track)' : repeatMode === 'track' ? 'Repeat: this track on loop (tap to repeat the playlist instead)' : 'Repeat: whole playlist on loop (tap to turn repeat off)'}
+            variant={`repeat-${repeatMode}`}
             onClick={cycleRepeat}
           >
             {repeatMode === 'track' ? '🔂' : '🔁'}
@@ -198,8 +215,10 @@ export default function MusicScreen() {
         onDelete={deletePlaylist}
         onNew={() => openBuilder(null)}
         onEdit={openBuilder}
+        onReorderPlaylists={reorderPlaylists}
         builderOpen={builderOpen}
         builderTrackIds={builderTrackIds}
+        onReorderBuilderTrack={reorderBuilderTrack}
         tracks={tracks}
         nameValue={builderName}
         onNameChange={setBuilderName}

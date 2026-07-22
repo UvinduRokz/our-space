@@ -1,0 +1,43 @@
+.tooltip-wrapper {
+  position: relative;
+  display: inline-flex;
+}
+
+.tooltip-bubble {
+  position: absolute;
+  left: 50%;
+  transform: translateX(-50%) translateY(2px);
+  z-index: 100;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: rgba(20, 14, 36, 0.95);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  color: #fff;
+  font-size: 0.72rem;
+  font-weight: 400;
+  white-space: nowrap;
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 0.15s ease, transform 0.15s ease;
+}
+
+.tooltip-top .tooltip-bubble {
+  bottom: calc(100% + 8px);
+}
+.tooltip-bottom .tooltip-bubble {
+  top: calc(100% + 8px);
+}
+
+.tooltip-wrapper:hover .tooltip-bubble,
+.tooltip-wrapper:focus-within .tooltip-bubble {
+  opacity: 1;
+  transform: translateX(-50%) translateY(0);
+}
+
+/* touch devices have no real hover — showing tooltips there just adds a
+   layer that never dismisses cleanly, so they're desktop/keyboard only */
+@media (hover: none) {
+  .tooltip-bubble {
+    display: none;
+  }
+}

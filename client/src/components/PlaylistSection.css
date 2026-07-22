@@ -1,0 +1,15 @@
+.music-drag-handle {
+  cursor: grab;
+  opacity: 0.5;
+  font-size: 0.9rem;
+  line-height: 1;
+  padding: 0 2px;
+}
+.music-playlist-row,
+.music-playlist-builder-tracks li {
+  transition: opacity 0.15s ease;
+}
+.music-playlist-row.dragging,
+.music-playlist-builder-tracks li.dragging {
+  opacity: 0.4;
+}

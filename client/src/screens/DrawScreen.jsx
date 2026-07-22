@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useApp } from '../context/AppContext.jsx';
 import BackButton from '../components/BackButton.jsx';
 import Modal from '../components/Modal.jsx';
+import Tooltip from '../components/Tooltip.jsx';
 import './DrawScreen.css';
 
 const SWATCHES = ['#1a1a1a', '#ffffff', '#e74c3c', '#f39c12', '#f1c40f', '#2ecc71', '#1abc9c', '#4f8fff', '#ff5fa8', '#9b59b6'];
@@ -290,14 +291,30 @@ export default function DrawScreen() {
       <p className={`draw-status${status.show ? ' show' : ''}`}>{status.text}</p>
 
       <div className="draw-toolbar">
-        <button type="button" className="draw-tool" title="Color" onClick={toggleColorPopover}>🎨</button>
-        <button type="button" className="draw-tool" title="Brush size" onClick={toggleSizePopover}>✏️</button>
-        <button type="button" className={`draw-tool${isErasing ? ' active' : ''}`} title="Eraser" onClick={toggleEraser}>🧹</button>
-        <button type="button" className="draw-tool" title="Undo" onClick={() => socket.emit('draw:undo')}>↩️</button>
-        <button type="button" className="draw-tool" title="Redo" onClick={() => socket.emit('draw:redo')}>↪️</button>
-        <button type="button" className={`draw-tool${gridVisible ? ' active' : ''}`} title="Grid" onClick={() => setGridVisible((v) => !v)}>▦</button>
-        <button type="button" className="draw-tool" title="Clear" onClick={handleClear}>🗑️</button>
-        <button type="button" className="draw-tool draw-tool-primary" title="Finish &amp; Save" onClick={handleFinish}>✅</button>
+        <Tooltip text="Pick a color">
+          <button type="button" className="draw-tool" onClick={toggleColorPopover}>🎨</button>
+        </Tooltip>
+        <Tooltip text="Brush size">
+          <button type="button" className="draw-tool" onClick={toggleSizePopover}>✏️</button>
+        </Tooltip>
+        <Tooltip text={isErasing ? 'Eraser (on)' : 'Eraser'}>
+          <button type="button" className={`draw-tool${isErasing ? ' active' : ''}`} onClick={toggleEraser}>🧹</button>
+        </Tooltip>
+        <Tooltip text="Undo last stroke">
+          <button type="button" className="draw-tool" onClick={() => socket.emit('draw:undo')}>↩️</button>
+        </Tooltip>
+        <Tooltip text="Redo">
+          <button type="button" className="draw-tool" onClick={() => socket.emit('draw:redo')}>↪️</button>
+        </Tooltip>
+        <Tooltip text={gridVisible ? 'Hide grid' : 'Show grid'}>
+          <button type="button" className={`draw-tool${gridVisible ? ' active' : ''}`} onClick={() => setGridVisible((v) => !v)}>▦</button>
+        </Tooltip>
+        <Tooltip text="Clear the whole drawing">
+          <button type="button" className="draw-tool" onClick={handleClear}>🗑️</button>
+        </Tooltip>
+        <Tooltip text="Finish & save this drawing">
+          <button type="button" className="draw-tool draw-tool-primary" onClick={handleFinish}>✅</button>
+        </Tooltip>
       </div>
 
       {colorPopoverOpen && (
