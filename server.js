@@ -265,6 +265,16 @@ app.get('/api/profile', requireAuth, async (req, res) => {
   res.json(await getProfile(req.side));
 });
 
+// Both sides' own profiles at once — used for showing your PARTNER's
+// chosen bear as their visual identity badge (Draw Together's corner
+// tags, presence badges, etc.), which /api/profile alone can't do since
+// it only ever returns the caller's own side.
+app.get('/api/profiles', requireAuth, async (req, res) => {
+  const result = {};
+  for (const s of SIDES) result[s] = await getProfile(s);
+  res.json(result);
+});
+
 app.post('/api/profile', requireAuth, async (req, res) => {
   const partnerNickname = String((req.body && req.body.partnerNickname) || '').trim().slice(0, 30);
   const bear = BEAR_OPTIONS.includes(req.body && req.body.bear) ? req.body.bear : DEFAULT_PROFILE.bear;
@@ -274,7 +284,9 @@ app.post('/api/profile', requireAuth, async (req, res) => {
     bear,
   };
   await saveProfiles(profiles);
-  res.json(await getProfile(req.side));
+  const updated = await getProfile(req.side);
+  io.emit('profile:updated', { side: req.side, ...updated });
+  res.json(updated);
 });
 
 app.get('/api/history', requireAuth, async (req, res) => {
@@ -706,6 +718,7 @@ io.on('connection', (socket) => {
           const payload = JSON.stringify({
             title: `${(await getProfile(otherSide)).partnerNickname} wants to play together! 🎮`,
             body: 'Open the app to join an activity',
+            icon: `/cursors/${(await getProfile(socket.side)).bear}-idle.svg`,
           });
           webpush.sendNotification(sub, payload).catch(async (err) => {
             if (err.statusCode === 404 || err.statusCode === 410) {
@@ -734,6 +747,7 @@ io.on('connection', (socket) => {
         const payload = JSON.stringify({
           title: `${(await getProfile(otherSide)).partnerNickname} is thinking of you 💕`,
           body: 'Tap to open and send one back',
+          icon: `/cursors/${(await getProfile(side)).bear}-idle.svg`,
         });
         try {
           await webpush.sendNotification(sub, payload);

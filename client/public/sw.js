@@ -8,6 +8,7 @@ self.addEventListener('push', (event) => {
   event.waitUntil(
     self.registration.showNotification(title, {
       body: data.body || '',
+      icon: data.icon || undefined, // the sender's chosen bear, when set
       vibrate: [100, 50, 100],
       tag: 'thinking-of-you',
       renotify: true,

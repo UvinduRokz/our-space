@@ -46,6 +46,10 @@ export function AppProvider({ children }) {
   const [side, setSide] = useState(() => localStorage.getItem('toy_side') || '');
   const [authStatus, setAuthStatus] = useState('checking'); // 'checking' | 'authenticated' | 'unauthenticated'
   const [profile, setProfile] = useState(DEFAULT_PROFILE);
+  // Both sides' own profiles — /api/profile only ever returns YOUR OWN, so
+  // this is what lets a screen show your PARTNER's chosen bear (their
+  // visual identity) rather than just your own cursor.
+  const [profiles, setProfiles] = useState({ blue: DEFAULT_PROFILE, pink: DEFAULT_PROFILE });
   const [partnerActivity, setPartnerActivity] = useState('idle');
   const [partnerOnline, setPartnerOnline] = useState(null); // null = no presence event received yet
   const [socket, setSocket] = useState(null);
@@ -101,6 +105,9 @@ export function AppProvider({ children }) {
     apiGet('/api/profile', name)
       .then(setProfile)
       .catch((err) => console.warn('[profile] failed to load, using defaults', err));
+    apiGet('/api/profiles', name)
+      .then(setProfiles)
+      .catch((err) => console.warn('[profiles] failed to load, using defaults', err));
 
     const nextSocket = io({ auth: { name } });
     setSocket(nextSocket);
@@ -112,6 +119,9 @@ export function AppProvider({ children }) {
     nextSocket.on('activity:state', ({ side: fromSide, activity }) => {
       if (fromSide !== otherSide) return;
       setPartnerActivity(activity);
+    });
+    nextSocket.on('profile:updated', ({ side: fromSide, ...updated }) => {
+      setProfiles((prev) => ({ ...prev, [fromSide]: updated }));
     });
 
     return () => {
@@ -150,6 +160,7 @@ export function AppProvider({ children }) {
     authStatus,
     profile,
     setProfile,
+    profiles,
     partnerActivity,
     partnerOnline,
     socket,

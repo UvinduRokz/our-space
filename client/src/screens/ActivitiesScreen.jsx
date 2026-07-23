@@ -12,7 +12,9 @@ const CARDS = [
 ];
 
 export default function ActivitiesScreen() {
-  const { navigateTo, partnerActivity } = useApp();
+  const { navigateTo, partnerActivity, side, profiles } = useApp();
+  const partnerSide = side === 'blue' ? 'pink' : 'blue';
+  const partnerBear = profiles[partnerSide].bear;
 
   return (
     <section className="screen screen--scrollable">
@@ -26,6 +28,7 @@ export default function ActivitiesScreen() {
             label={c.label}
             onClick={() => navigateTo(c.screen)}
             badgeVisible={c.showBadge && partnerActivity === c.activity}
+            partnerBear={partnerBear}
           />
         ))}
       </div>

@@ -136,7 +136,7 @@ const ASPECT_PRESETS = [
 ];
 
 export default function DrawScreen() {
-  const { socket, side, profile, apiPost, partnerActivity } = useApp();
+  const { socket, side, profile, profiles, apiPost, partnerActivity } = useApp();
   const partnerHere = partnerActivity === 'draw';
 
   const stageFrameRef = useRef(null);
@@ -1113,8 +1113,12 @@ export default function DrawScreen() {
           <div className="draw-guides">
             {gridVisible && <div className="draw-grid-overlay" />}
             <div className="draw-divider" />
-            <span className="draw-tag draw-tag-left">💙</span>
-            <span className="draw-tag draw-tag-right">💗</span>
+            <span className="draw-tag draw-tag-left">
+              <img src={`/cursors/${profiles.blue.bear}-idle.svg`} alt="" className="draw-tag-bear" />
+            </span>
+            <span className="draw-tag draw-tag-right">
+              <img src={`/cursors/${profiles.pink.bear}-idle.svg`} alt="" className="draw-tag-bear" />
+            </span>
           </div>
           {textEditing && (
             <input
