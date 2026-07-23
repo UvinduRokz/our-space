@@ -187,6 +187,11 @@ export default function DrawScreen() {
   const [gridVisible, setGridVisible] = useState(false);
   const [status, setStatus] = useState({ text: '', show: false });
   const [reveal, setReveal] = useState(null); // saved drawing url, or null
+  // null | 'waiting' (I asked, waiting on partner) | 'incoming' (partner
+  // asked, it's on me to respond) — one each for finish/save and reset,
+  // since both need the other side's sign-off before actually happening.
+  const [finishConfirm, setFinishConfirm] = useState(null);
+  const [resetConfirm, setResetConfirm] = useState(null);
   const statusTimerRef = useRef(null);
 
   const activeCategory =
@@ -813,6 +818,36 @@ export default function DrawScreen() {
       }
     }
 
+    function onFinishRequested() {
+      setFinishConfirm('incoming');
+    }
+    function onFinishResponse({ approved }) {
+      setFinishConfirm((prev) => {
+        if (prev !== 'waiting') return prev; // already dismissed locally, ignore
+        if (approved) performFinish();
+        else showDrawStatus(`${profile.partnerNickname} said not yet`);
+        return null;
+      });
+    }
+    function onFinishUnavailable() {
+      setFinishConfirm(null);
+      showDrawStatus(`${profile.partnerNickname} isn't online right now`);
+    }
+    function onResetRequested() {
+      setResetConfirm('incoming');
+    }
+    function onResetResponse({ approved }) {
+      setResetConfirm((prev) => {
+        if (prev !== 'waiting') return prev;
+        if (!approved) showDrawStatus(`${profile.partnerNickname} said not to reset`);
+        return null;
+      });
+    }
+    function onResetUnavailable() {
+      setResetConfirm(null);
+      showDrawStatus(`${profile.partnerNickname} isn't online right now`);
+    }
+
     canvas.addEventListener('pointerdown', onPointerDown);
     canvas.addEventListener('pointermove', onPointerMove);
     canvas.addEventListener('pointerup', onPointerUp);
@@ -829,6 +864,12 @@ export default function DrawScreen() {
     socket.on('draw:redo', onRedo);
     socket.on('draw:cleared', onCleared);
     socket.on('draw:aspect-ratio', onAspectRatio);
+    socket.on('draw:finish-requested', onFinishRequested);
+    socket.on('draw:finish-response', onFinishResponse);
+    socket.on('draw:finish-unavailable', onFinishUnavailable);
+    socket.on('draw:reset-requested', onResetRequested);
+    socket.on('draw:reset-response', onResetResponse);
+    socket.on('draw:reset-unavailable', onResetUnavailable);
 
     socket.emit('draw:sync');
 
@@ -848,6 +889,12 @@ export default function DrawScreen() {
       socket.off('draw:undo', onUndo);
       socket.off('draw:redo', onRedo);
       socket.off('draw:cleared', onCleared);
+      socket.off('draw:finish-requested', onFinishRequested);
+      socket.off('draw:finish-response', onFinishResponse);
+      socket.off('draw:finish-unavailable', onFinishUnavailable);
+      socket.off('draw:reset-requested', onResetRequested);
+      socket.off('draw:reset-response', onResetResponse);
+      socket.off('draw:reset-unavailable', onResetUnavailable);
       eng.isDrawing = false;
       eng.lastLocalPoint = null;
       eng.shapeStart = null;
@@ -946,7 +993,7 @@ export default function DrawScreen() {
     setColorPopoverOpen((v) => !v);
   }
 
-  async function handleFinish() {
+  async function performFinish() {
     const canvas = canvasRef.current;
     const exportCanvas = document.createElement('canvas');
     exportCanvas.width = canvas.width;
@@ -1003,9 +1050,29 @@ export default function DrawScreen() {
     socket.emit('draw:clear');
   }
 
+  // Finish/save and reset both touch the WHOLE shared drawing (or end it),
+  // so instead of firing immediately they ask the other side to confirm
+  // first — see the matching draw:finish-*/draw:reset-* handlers in
+  // server.js. handleClear above stays instant since it's already scoped
+  // to just the clicking side's own half.
+  function handleFinish() {
+    socket.emit('draw:finish-request');
+    setFinishConfirm('waiting');
+  }
+
   function handleReset() {
-    if (!window.confirm("Reset the whole drawing for both of you, including the canvas shape? (not saved)")) return;
-    socket.emit('draw:reset');
+    socket.emit('draw:reset-request');
+    setResetConfirm('waiting');
+  }
+
+  function respondFinish(approved) {
+    socket.emit('draw:finish-respond', { approved });
+    setFinishConfirm(null);
+  }
+
+  function respondReset(approved) {
+    socket.emit('draw:reset-respond', { approved });
+    setResetConfirm(null);
   }
 
   return (
@@ -1125,6 +1192,42 @@ export default function DrawScreen() {
       {reveal && (
         <Modal onClose={handleRevealClose}>
           <img src={reveal} alt="your finished drawing" />
+        </Modal>
+      )}
+
+      {finishConfirm === 'incoming' && (
+        <Modal
+          onClose={() => respondFinish(false)}
+          actions={
+            <button type="button" className="framed-modal-download" onClick={() => respondFinish(true)}>
+              Yes, save it
+            </button>
+          }
+        >
+          <p>{profile.partnerNickname} wants to save this drawing. Save it?</p>
+        </Modal>
+      )}
+      {finishConfirm === 'waiting' && (
+        <Modal onClose={() => setFinishConfirm(null)}>
+          <p>Waiting for {profile.partnerNickname} to confirm saving this drawing…</p>
+        </Modal>
+      )}
+
+      {resetConfirm === 'incoming' && (
+        <Modal
+          onClose={() => respondReset(false)}
+          actions={
+            <button type="button" className="framed-modal-download" onClick={() => respondReset(true)}>
+              Yes, reset it
+            </button>
+          }
+        >
+          <p>{profile.partnerNickname} wants to reset the whole drawing (both sides + canvas shape). This can't be undone. Reset it?</p>
+        </Modal>
+      )}
+      {resetConfirm === 'waiting' && (
+        <Modal onClose={() => setResetConfirm(null)}>
+          <p>Waiting for {profile.partnerNickname} to confirm resetting the whole drawing…</p>
         </Modal>
       )}
     </section>

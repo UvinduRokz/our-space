@@ -177,10 +177,10 @@ export default function DrawToolbar({
           <Tooltip text="Clear your half only">
             <button type="button" className="draw-tool" onClick={onClear}>🗑️</button>
           </Tooltip>
-          <Tooltip text="Reset the whole drawing (both sides + canvas shape)">
+          <Tooltip text="Reset the whole drawing (both sides + canvas shape) — needs your partner to confirm">
             <button type="button" className="draw-tool" onClick={onReset}>🔄</button>
           </Tooltip>
-          <Tooltip text="Finish & save this drawing">
+          <Tooltip text="Finish & save this drawing — needs your partner to confirm">
             <button type="button" className="draw-tool draw-tool-primary" onClick={onFinish}>✅</button>
           </Tooltip>
         </div>

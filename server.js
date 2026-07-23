@@ -919,7 +919,9 @@ io.on('connection', (socket) => {
   });
 
   // Clears only the clicking side's own half — not the partner's, and not
-  // the chosen aspect ratio (that's shared for the whole drawing).
+  // the chosen aspect ratio (that's shared for the whole drawing). Scoped
+  // to your own side already, so unlike finish/reset below it doesn't need
+  // the other side's sign-off.
   socket.on('draw:clear', () => {
     const side = socket.side;
     const hadStrokes = drawState[side].length > 0;
@@ -929,18 +931,40 @@ io.on('connection', (socket) => {
     io.emit('draw:cleared', { side });
   });
 
-  // Wipes both sides AND the chosen aspect ratio, re-opening the picker —
-  // the "start a whole new drawing" action, distinct from the per-side
-  // draw:clear above.
-  socket.on('draw:reset', () => {
+  function performDrawReset(requestingSide) {
     const hadStrokes = drawState.blue.length > 0 || drawState.pink.length > 0;
-    if (hadStrokes) appendHistory('draw_reset', socket.side, {});
+    if (hadStrokes) appendHistory('draw_reset', requestingSide, {});
     drawState = { blue: [], pink: [] };
     drawRedoStack = { blue: [], pink: [] };
     drawAspectRatio = null;
     drawAspectPreset = null;
     io.emit('draw:cleared', { side: null });
     io.emit('draw:aspect-ratio', { ratio: null, preset: null });
+  }
+
+  // Finish/save and reset both affect (or end) the WHOLE shared drawing,
+  // not just the clicking side's half — so unlike draw:clear, they go
+  // through a request/respond round trip instead of firing immediately.
+  // The requester never gets to unilaterally decide either one.
+  socket.on('draw:finish-request', () => {
+    const otherSide = SIDES.find((s) => s !== socket.side);
+    if (!isOnline(otherSide)) return socket.emit('draw:finish-unavailable');
+    io.to(otherSide).emit('draw:finish-requested', { side: socket.side });
+  });
+  socket.on('draw:finish-respond', ({ approved }) => {
+    const otherSide = SIDES.find((s) => s !== socket.side); // the original requester
+    if (isOnline(otherSide)) io.to(otherSide).emit('draw:finish-response', { approved: !!approved });
+  });
+
+  socket.on('draw:reset-request', () => {
+    const otherSide = SIDES.find((s) => s !== socket.side);
+    if (!isOnline(otherSide)) return socket.emit('draw:reset-unavailable');
+    io.to(otherSide).emit('draw:reset-requested', { side: socket.side });
+  });
+  socket.on('draw:reset-respond', ({ approved }) => {
+    const otherSide = SIDES.find((s) => s !== socket.side); // the original requester
+    if (approved) performDrawReset(otherSide);
+    if (isOnline(otherSide)) io.to(otherSide).emit('draw:reset-response', { approved: !!approved });
   });
 
   socket.on('music:sync', () => {
