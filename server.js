@@ -453,7 +453,12 @@ app.delete('/api/playlists/:id', requireAuth, async (req, res) => {
 });
 
 const server = http.createServer(app);
-const io = new Server(server);
+// Defaults (pingInterval 25s / pingTimeout 20s) mean an UNCLEAN disconnect
+// (phone backgrounded/OS-killed without a proper close, network drop) can
+// take up to ~45s to be noticed — the partner's screen would keep showing
+// you as online/wherever-you-last-were that whole time. Tightened so the
+// worst case is ~10s instead, cheap for a 2-person app's traffic level.
+const io = new Server(server, { pingInterval: 5000, pingTimeout: 5000 });
 
 // Each socket joins a room named after its side ('blue'/'pink'). Using rooms
 // instead of a single side->socket.id map means multiple simultaneous

@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from 'react';
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import { setupPush } from '../lib/push.js';
 
@@ -55,6 +55,15 @@ export function AppProvider({ children }) {
   const [socket, setSocket] = useState(null);
   const [currentScreen, setCurrentScreen] = useState('main');
   const [vapidPublicKey, setVapidPublicKey] = useState(null);
+  // Read (not just captured in a closure) from the socket 'connect' handler
+  // below, so a RE-connect (network recovers, phone backgrounds/unbackgrounds,
+  // etc.) always re-announces whatever screen you're currently on — without
+  // this, the partner's view of "where you are" only updates on your next
+  // explicit navigation, not on reconnect, and can sit stale indefinitely.
+  const currentScreenRef = useRef(currentScreen);
+  useEffect(() => {
+    currentScreenRef.current = currentScreen;
+  }, [currentScreen]);
 
   useEffect(() => {
     fetch('/api/config')
@@ -111,6 +120,16 @@ export function AppProvider({ children }) {
 
     const nextSocket = io({ auth: { name } });
     setSocket(nextSocket);
+
+    // Fires on the initial connect AND every automatic reconnect (network
+    // recovers, phone un-backgrounds, etc.) — re-announcing your current
+    // screen each time means the partner's "where are they" view can't go
+    // stale just because your OWN connection dropped and came back; it no
+    // longer depends on you happening to navigate again afterward.
+    nextSocket.on('connect', () => {
+      const activity = SCREEN_TO_ACTIVITY[currentScreenRef.current];
+      if (activity) nextSocket.emit('activity:update', { activity });
+    });
 
     const otherSide = side === 'blue' ? 'pink' : 'blue';
     nextSocket.on('presence', ({ online }) => {
