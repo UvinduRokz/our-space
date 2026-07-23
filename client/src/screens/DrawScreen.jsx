@@ -1206,7 +1206,7 @@ export default function DrawScreen() {
         <Modal
           onClose={() => setFinishConfirm(null)}
           actions={
-            <button type="button" className="framed-modal-download" onClick={confirmFinishRequest}>
+            <button type="button" className="framed-modal-primary" onClick={confirmFinishRequest}>
               Yes, ask {profile.partnerNickname}
             </button>
           }
@@ -1218,7 +1218,7 @@ export default function DrawScreen() {
         <Modal
           onClose={() => respondFinish(false)}
           actions={
-            <button type="button" className="framed-modal-download" onClick={() => respondFinish(true)}>
+            <button type="button" className="framed-modal-primary" onClick={() => respondFinish(true)}>
               Yes, save it
             </button>
           }
@@ -1236,7 +1236,7 @@ export default function DrawScreen() {
         <Modal
           onClose={() => setResetConfirm(null)}
           actions={
-            <button type="button" className="framed-modal-download" onClick={confirmResetRequest}>
+            <button type="button" className="framed-modal-primary" onClick={confirmResetRequest}>
               Yes, ask {profile.partnerNickname}
             </button>
           }
@@ -1248,7 +1248,7 @@ export default function DrawScreen() {
         <Modal
           onClose={() => respondReset(false)}
           actions={
-            <button type="button" className="framed-modal-download" onClick={() => respondReset(true)}>
+            <button type="button" className="framed-modal-primary" onClick={() => respondReset(true)}>
               Yes, reset it
             </button>
           }

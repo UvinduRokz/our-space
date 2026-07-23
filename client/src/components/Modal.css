@@ -35,7 +35,8 @@
   100% { transform: scale(1) rotate(0deg); opacity: 1; }
 }
 .framed-modal-close,
-.framed-modal-download {
+.framed-modal-download,
+.framed-modal-primary {
   position: relative;
   z-index: 1;
   padding: 10px 20px;
@@ -43,5 +44,19 @@
 .framed-modal-download {
   background: rgba(255, 255, 255, 0.15);
   text-decoration: none;
+  color: #fff;
+}
+/* Close falls back to the app-wide default <button> style (the vibrant
+   blue/pink gradient — see index.css), which reads as the PRIMARY action
+   just by being unstyled here. That's backwards for a confirm dialog: the
+   button that actually does something (confirm/save/reset) should look
+   prominent, and dismissing should look secondary — so mute Close and
+   give the real action button its own explicit primary style instead. */
+.framed-modal-close {
+  background: rgba(255, 255, 255, 0.15);
+  color: #fff;
+}
+.framed-modal-primary {
+  background: linear-gradient(90deg, var(--blue), var(--pink));
   color: #fff;
 }
