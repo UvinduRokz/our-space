@@ -1051,16 +1051,23 @@ export default function DrawScreen() {
   }
 
   // Finish/save and reset both touch the WHOLE shared drawing (or end it),
-  // so instead of firing immediately they ask the other side to confirm
-  // first — see the matching draw:finish-*/draw:reset-* handlers in
-  // server.js. handleClear above stays instant since it's already scoped
-  // to just the clicking side's own half.
+  // so neither fires immediately — tapping the button first asks YOU to
+  // confirm you meant it ('confirm'), then asks your partner too
+  // ('waiting' while they decide) — see the matching draw:finish-*/
+  // draw:reset-* handlers in server.js. handleClear above stays instant
+  // since it's already scoped to just the clicking side's own half.
   function handleFinish() {
+    setFinishConfirm('confirm');
+  }
+  function confirmFinishRequest() {
     socket.emit('draw:finish-request');
     setFinishConfirm('waiting');
   }
 
   function handleReset() {
+    setResetConfirm('confirm');
+  }
+  function confirmResetRequest() {
     socket.emit('draw:reset-request');
     setResetConfirm('waiting');
   }
@@ -1195,6 +1202,18 @@ export default function DrawScreen() {
         </Modal>
       )}
 
+      {finishConfirm === 'confirm' && (
+        <Modal
+          onClose={() => setFinishConfirm(null)}
+          actions={
+            <button type="button" className="framed-modal-download" onClick={confirmFinishRequest}>
+              Yes, ask {profile.partnerNickname}
+            </button>
+          }
+        >
+          <p>Save this drawing? {profile.partnerNickname} will need to confirm too.</p>
+        </Modal>
+      )}
       {finishConfirm === 'incoming' && (
         <Modal
           onClose={() => respondFinish(false)}
@@ -1213,6 +1232,18 @@ export default function DrawScreen() {
         </Modal>
       )}
 
+      {resetConfirm === 'confirm' && (
+        <Modal
+          onClose={() => setResetConfirm(null)}
+          actions={
+            <button type="button" className="framed-modal-download" onClick={confirmResetRequest}>
+              Yes, ask {profile.partnerNickname}
+            </button>
+          }
+        >
+          <p>Reset the whole drawing (both sides + canvas shape)? {profile.partnerNickname} will need to confirm too.</p>
+        </Modal>
+      )}
       {resetConfirm === 'incoming' && (
         <Modal
           onClose={() => respondReset(false)}
