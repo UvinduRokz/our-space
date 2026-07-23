@@ -54,6 +54,11 @@ you call each other.
    - `BOY_NAME` / `GIRL_NAME` — the two login names (case-insensitive)
    - `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` — from step 2
    - `CONTACT_EMAIL` — used in the VAPID subject, any address is fine
+   - `MONGODB_URI` / `MONGODB_DB_NAME` — from a free MongoDB Atlas cluster
+   - `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET`
+     — from a free Cloudinary account
+   
+   See [Data storage](#data-storage) below for details on the last two.
 
 4. Run it:
    ```
@@ -81,22 +86,23 @@ Once deployed:
 
 ## Data storage
 
-Everything persists to small JSON files next to `server.js` (no external
-database — this app is built for exactly two people, so a real DB would be
-overkill):
+Structured data lives in MongoDB Atlas (one collection each for
+subscriptions, profiles, history, drawings, music, musicDefault, and
+playlists); uploaded/generated media (saved drawings, uploaded MP3s, the two
+generated ambient `.wav` loops) lives in Cloudinary. Neither depends on the
+server's own disk, so redeploying (even on a host with an ephemeral
+filesystem, like Render's free tier) doesn't lose anything.
 
-- `subscriptions.json` — push subscriptions
-- `profiles.json` — each side's "what I call my partner" setting
-- `history.json` — the activity log behind the recap/timeline (capped at the
-  most recent 5000 events)
-- `drawings.json` + `public/drawings/*.png` — the Gallery archive: a manifest
-  plus the actual saved PNG files from "Finish & Save" in Draw Together
-- `music.json` + `public/music/*` — the shared music library: two generated
-  ambient `.wav` loops plus whatever `.mp3`s you upload (15MB cap per file)
+Set these in `.env` (see `.env.example`):
+- `MONGODB_URI` / `MONGODB_DB_NAME` — an Atlas connection string and the
+  database name to use (use a different `MONGODB_DB_NAME` for local dev vs
+  prod so testing never touches real data)
+- `CLOUDINARY_CLOUD_NAME` / `CLOUDINARY_API_KEY` / `CLOUDINARY_API_SECRET` —
+  from your Cloudinary dashboard's Account Details panel
 
-If you deploy somewhere with an ephemeral filesystem (e.g. free-tier
-containers that reset on redeploy), these will be lost on redeploy — fine at
-this scale, but worth knowing.
+`history` is capped at the most recent 5000 events via a MongoDB capped
+collection (created automatically on first boot) — oldest events are
+evicted automatically, no app-side logic needed.
 
 ## Notes
 

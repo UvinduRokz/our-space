@@ -3,8 +3,6 @@
 // with an envelope) — no attempt at real composed music, no dependencies,
 // no copyrighted material.
 const crypto = require('crypto');
-const path = require('path');
-const fs = require('fs');
 
 const SAMPLE_RATE = 22050;
 
@@ -70,23 +68,23 @@ const BUILTIN_TRACKS = [
   { title: 'Gentle Arpeggio', render: gentleArpeggio, duration: 20 },
 ];
 
-function ensureBuiltinTracks({ musicDir, loadManifest, saveManifest }) {
-  const manifest = loadManifest();
+// uploadBuffer(wavBuffer, id) -> { cloudinaryUrl, cloudinaryPublicId } is
+// injected from server.js, same as loadManifest/saveManifest — keeps this
+// file decoupled from exactly how/where a track ends up stored.
+async function ensureBuiltinTracks({ loadManifest, saveManifest, uploadBuffer }) {
+  const manifest = await loadManifest();
   if (manifest.filter((m) => m.builtin).length >= BUILTIN_TRACKS.length) return;
 
-  fs.mkdirSync(musicDir, { recursive: true });
-
-  BUILTIN_TRACKS.forEach(({ title, render, duration }) => {
-    if (manifest.some((m) => m.builtin && m.title === title)) return;
+  for (const { title, render, duration } of BUILTIN_TRACKS) {
+    if (manifest.some((m) => m.builtin && m.title === title)) continue;
     const samples = renderTrack(render, duration, SAMPLE_RATE);
     const wav = encodeWav(samples, SAMPLE_RATE);
     const id = crypto.randomUUID();
-    const filename = `${id}.wav`;
-    fs.writeFileSync(path.join(musicDir, filename), wav);
-    manifest.push({ id, title, filename, ts: Date.now(), side: null, builtin: true });
-  });
+    const { cloudinaryUrl, cloudinaryPublicId } = await uploadBuffer(wav, id);
+    manifest.push({ id, title, ts: Date.now(), side: null, builtin: true, cloudinaryUrl, cloudinaryPublicId });
+  }
 
-  saveManifest(manifest);
+  await saveManifest(manifest);
 }
 
 module.exports = { ensureBuiltinTracks };

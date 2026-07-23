@@ -1,11 +1,2 @@
 node_modules/
 .env
-subscriptions.json
-profiles.json
-history.json
-drawings.json
-public/drawings/
-music.json
-music-default.json
-public/music/
-playlists.json

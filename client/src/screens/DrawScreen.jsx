@@ -192,6 +192,18 @@ export default function DrawScreen() {
   // since both need the other side's sign-off before actually happening.
   const [finishConfirm, setFinishConfirm] = useState(null);
   const [resetConfirm, setResetConfirm] = useState(null);
+  // Mirrors of the two states above, read (not written) from the socket
+  // response handlers below instead of a setState functional updater — an
+  // updater that also performs a side effect (like performFinish(), a
+  // network request) gets that side effect run TWICE under StrictMode,
+  // which deliberately double-invokes updater functions in dev to catch
+  // exactly this impurity. Confirmed: it really did send two POST
+  // /api/drawings requests per single approval. Plain refs don't have that
+  // purity requirement.
+  const finishConfirmRef = useRef(finishConfirm);
+  const resetConfirmRef = useRef(resetConfirm);
+  useEffect(() => { finishConfirmRef.current = finishConfirm; }, [finishConfirm]);
+  useEffect(() => { resetConfirmRef.current = resetConfirm; }, [resetConfirm]);
   const statusTimerRef = useRef(null);
 
   const activeCategory =
@@ -822,12 +834,10 @@ export default function DrawScreen() {
       setFinishConfirm('incoming');
     }
     function onFinishResponse({ approved }) {
-      setFinishConfirm((prev) => {
-        if (prev !== 'waiting') return prev; // already dismissed locally, ignore
-        if (approved) performFinish();
-        else showDrawStatus(`${profile.partnerNickname} said not yet`);
-        return null;
-      });
+      if (finishConfirmRef.current !== 'waiting') return; // already dismissed locally, ignore
+      setFinishConfirm(null);
+      if (approved) performFinish();
+      else showDrawStatus(`${profile.partnerNickname} said not yet`);
     }
     function onFinishUnavailable() {
       setFinishConfirm(null);
@@ -837,11 +847,9 @@ export default function DrawScreen() {
       setResetConfirm('incoming');
     }
     function onResetResponse({ approved }) {
-      setResetConfirm((prev) => {
-        if (prev !== 'waiting') return prev;
-        if (!approved) showDrawStatus(`${profile.partnerNickname} said not to reset`);
-        return null;
-      });
+      if (resetConfirmRef.current !== 'waiting') return;
+      setResetConfirm(null);
+      if (!approved) showDrawStatus(`${profile.partnerNickname} said not to reset`);
     }
     function onResetUnavailable() {
       setResetConfirm(null);

@@ -3,10 +3,11 @@ const express = require('express');
 const http = require('http');
 const { Server } = require('socket.io');
 const webpush = require('web-push');
-const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 const multer = require('multer');
+const { MongoClient } = require('mongodb');
+const { v2: cloudinary } = require('cloudinary');
 const { WORDLE_WORDS, DICTIONARY } = require('./server/words');
 const { ensureBuiltinTracks } = require('./server/generate-music');
 
@@ -19,19 +20,10 @@ const NAME_TO_SIDE = {
   [BOY_NAME.trim().toLowerCase()]: 'blue',
   [GIRL_NAME.trim().toLowerCase()]: 'pink',
 };
-const DATA_FILE = path.join(__dirname, 'subscriptions.json');
-const PROFILES_FILE = path.join(__dirname, 'profiles.json');
-const HISTORY_FILE = path.join(__dirname, 'history.json');
 const HISTORY_MAX = 5000;
 const BEAR_OPTIONS = ['good-luck-bear', 'grumpy-bear', 'share-bear', 'tenderheart-bear', 'bedtime-bear', 'cheer-bear', 'funshine-bear'];
 const DEFAULT_PROFILE = { partnerNickname: 'babe', bear: 'tenderheart-bear' };
-const DRAWINGS_FILE = path.join(__dirname, 'drawings.json');
-const DRAWINGS_DIR = path.join(__dirname, 'public', 'drawings');
 const MAX_DRAWING_BYTES = 2 * 1024 * 1024;
-const MUSIC_FILE = path.join(__dirname, 'music.json');
-const MUSIC_DEFAULT_FILE = path.join(__dirname, 'music-default.json');
-const PLAYLISTS_FILE = path.join(__dirname, 'playlists.json');
-const MUSIC_DIR = path.join(__dirname, 'public', 'music');
 const MAX_MUSIC_BYTES = 15 * 1024 * 1024;
 const MUSIC_MIME_TYPES = ['audio/mpeg', 'audio/mp3', 'audio/wav', 'audio/x-wav'];
 
@@ -39,6 +31,32 @@ if (!process.env.VAPID_PUBLIC_KEY || !process.env.VAPID_PRIVATE_KEY) {
   console.error('Missing VAPID keys in .env — run "npm run genkeys" and paste them in.');
   process.exit(1);
 }
+if (!process.env.MONGODB_URI || !process.env.MONGODB_DB_NAME) {
+  console.error('Missing MONGODB_URI/MONGODB_DB_NAME in .env — see README for setup.');
+  process.exit(1);
+}
+if (!process.env.CLOUDINARY_CLOUD_NAME || !process.env.CLOUDINARY_API_KEY || !process.env.CLOUDINARY_API_SECRET) {
+  console.error('Missing CLOUDINARY_* keys in .env — see README for setup.');
+  process.exit(1);
+}
+
+// Created once at module load and reused for the process lifetime — the
+// driver's own connection pool is designed for exactly this (a long-running
+// server), not a connect/disconnect-per-request pattern.
+const mongoClient = new MongoClient(process.env.MONGODB_URI);
+let dbPromise = null;
+function connectDb() {
+  if (!dbPromise) {
+    dbPromise = mongoClient.connect().then(() => mongoClient.db(process.env.MONGODB_DB_NAME));
+  }
+  return dbPromise;
+}
+
+cloudinary.config({
+  cloud_name: process.env.CLOUDINARY_CLOUD_NAME,
+  api_key: process.env.CLOUDINARY_API_KEY,
+  api_secret: process.env.CLOUDINARY_API_SECRET,
+});
 
 webpush.setVapidDetails(
   'mailto:' + (process.env.CONTACT_EMAIL || 'example@example.com'),
@@ -50,108 +68,157 @@ function sideForName(name) {
   return NAME_TO_SIDE[String(name || '').trim().toLowerCase()];
 }
 
-function loadSubs() {
-  if (!fs.existsSync(DATA_FILE)) return {};
-  try {
-    return JSON.parse(fs.readFileSync(DATA_FILE, 'utf8'));
-  } catch {
-    return {};
-  }
+// blue/pink keyed objects, same shape every call site already expects —
+// only the body changed (Mongo doc per side, _id: side) rather than one
+// JSON file, so every caller just gains async/await.
+async function loadSubs() {
+  const db = await connectDb();
+  const docs = await db.collection('subscriptions').find().toArray();
+  const subs = {};
+  for (const { _id, ...rest } of docs) subs[_id] = rest;
+  return subs;
 }
-function saveSubs(subs) {
-  fs.writeFileSync(DATA_FILE, JSON.stringify(subs, null, 2));
+async function saveSubs(subs) {
+  const db = await connectDb();
+  const ops = SIDES.map((side) =>
+    subs[side]
+      ? { replaceOne: { filter: { _id: side }, replacement: { _id: side, ...subs[side] }, upsert: true } }
+      : { deleteOne: { filter: { _id: side } } }
+  );
+  await db.collection('subscriptions').bulkWrite(ops);
 }
 
-function loadProfiles() {
-  if (!fs.existsSync(PROFILES_FILE)) return {};
-  try {
-    return JSON.parse(fs.readFileSync(PROFILES_FILE, 'utf8'));
-  } catch {
-    return {};
-  }
+async function loadProfiles() {
+  const db = await connectDb();
+  const docs = await db.collection('profiles').find().toArray();
+  const profiles = {};
+  for (const { _id, ...rest } of docs) profiles[_id] = rest;
+  return profiles;
 }
-function saveProfiles(profiles) {
-  fs.writeFileSync(PROFILES_FILE, JSON.stringify(profiles, null, 2));
+async function saveProfiles(profiles) {
+  const db = await connectDb();
+  const ops = SIDES.map((side) =>
+    profiles[side]
+      ? { replaceOne: { filter: { _id: side }, replacement: { _id: side, ...profiles[side] }, upsert: true } }
+      : { deleteOne: { filter: { _id: side } } }
+  );
+  await db.collection('profiles').bulkWrite(ops);
 }
-function getProfile(side) {
-  const profiles = loadProfiles();
+async function getProfile(side) {
+  const profiles = await loadProfiles();
   return { ...DEFAULT_PROFILE, ...(profiles[side] || {}) };
 }
 
-function loadHistory() {
-  if (!fs.existsSync(HISTORY_FILE)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(HISTORY_FILE, 'utf8'));
-  } catch {
-    return [];
-  }
+// A capped collection (created once at boot — see ensureHistoryCollection)
+// enforces the HISTORY_MAX cap and insertion order natively, replacing the
+// old load-full-array/push/splice/write-full-array dance entirely.
+async function loadHistory() {
+  const db = await connectDb();
+  const docs = await db.collection('history').find().sort({ ts: 1 }).toArray();
+  return docs.map(({ _id, ...rest }) => rest);
 }
-function appendHistory(type, side, details) {
-  const history = loadHistory();
-  history.push({ type, side, ts: Date.now(), details: details || {} });
-  if (history.length > HISTORY_MAX) history.splice(0, history.length - HISTORY_MAX);
-  fs.writeFileSync(HISTORY_FILE, JSON.stringify(history, null, 2));
+async function appendHistory(type, side, details) {
+  const db = await connectDb();
+  await db.collection('history').insertOne({ type, side, ts: Date.now(), details: details || {} });
+}
+async function ensureHistoryCollection(db) {
+  const existing = await db.listCollections({ name: 'history' }).toArray();
+  if (existing.length === 0) {
+    // size is a required companion to capped:true — generously sized well
+    // above what HISTORY_MAX small documents could ever total, so `max`
+    // (the actual limit we care about) is always what triggers trimming.
+    await db.createCollection('history', { capped: true, size: 5 * 1024 * 1024, max: HISTORY_MAX });
+  }
 }
 
-function loadDrawings() {
-  if (!fs.existsSync(DRAWINGS_FILE)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(DRAWINGS_FILE, 'utf8'));
-  } catch {
-    return [];
+// Array-shaped collections — save always fully replaces the collection's
+// contents to match the given array, mirroring the old "rewrite the whole
+// JSON file" behavior every call site already assumes. `id` <-> `_id` is
+// the only field remapped so every caller keeps using `.id` unchanged.
+// Every save*() call site follows the same "load array, mutate it in JS,
+// save the whole array back" shape the old JSON files used — deleteMany+
+// insertMany looked like the direct translation, but it isn't safe under
+// concurrent writes: two near-simultaneous saves (very possible with two
+// real partners both acting at once) can each try to re-insert the SAME
+// pre-existing document, and MongoDB rejects the second insert as a
+// duplicate key, crashing the request (confirmed — this took the whole
+// server down during testing). Per-document upserts are idempotent even
+// when two saves overlap on the same id, so this reruns the "collection
+// must end up matching this array" logic as one bulk upsert pass plus a
+// single delete for whatever's no longer present, instead of wipe-then-
+// reinsert-everything.
+async function syncArrayCollection(name, items) {
+  const db = await connectDb();
+  const col = db.collection(name);
+  const ids = items.map((item) => item.id);
+  if (items.length) {
+    await col.bulkWrite(
+      items.map(({ id, ...rest }) => ({
+        replaceOne: { filter: { _id: id }, replacement: { _id: id, ...rest }, upsert: true },
+      }))
+    );
   }
+  await col.deleteMany({ _id: { $nin: ids.length ? ids : [null] } });
 }
-function saveDrawings(drawings) {
-  fs.writeFileSync(DRAWINGS_FILE, JSON.stringify(drawings, null, 2));
+// For adding ONE new item, prefer this over load-push-save(wholeArray):
+// syncArrayCollection's final "delete anything not in this array" step is
+// itself a race if two adds happen concurrently — confirmed in testing,
+// where two overlapping saves each deleted the OTHER's freshly-inserted
+// item because neither's snapshot knew about it. A single insertOne can't
+// lose a concurrent sibling insert; it just succeeds independently.
+async function insertArrayItem(name, item) {
+  const db = await connectDb();
+  const { id, ...rest } = item;
+  await db.collection(name).insertOne({ _id: id, ...rest });
 }
 
-function loadMusic() {
-  if (!fs.existsSync(MUSIC_FILE)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(MUSIC_FILE, 'utf8'));
-  } catch {
-    return [];
-  }
+async function loadDrawings() {
+  const db = await connectDb();
+  const docs = await db.collection('drawings').find().sort({ ts: 1 }).toArray();
+  return docs.map(({ _id, ...rest }) => ({ id: _id, ...rest }));
 }
-function loadPlaylists() {
-  if (!fs.existsSync(PLAYLISTS_FILE)) return [];
-  try {
-    return JSON.parse(fs.readFileSync(PLAYLISTS_FILE, 'utf8'));
-  } catch {
-    return [];
-  }
-}
-function savePlaylists(playlists) {
-  fs.writeFileSync(PLAYLISTS_FILE, JSON.stringify(playlists, null, 2));
-}
-function loadMusicDefault() {
-  if (!fs.existsSync(MUSIC_DEFAULT_FILE)) return { trackId: null, playlistId: null };
-  try {
-    return JSON.parse(fs.readFileSync(MUSIC_DEFAULT_FILE, 'utf8'));
-  } catch {
-    return { trackId: null, playlistId: null };
-  }
-}
-function saveMusicDefault(def) {
-  fs.writeFileSync(MUSIC_DEFAULT_FILE, JSON.stringify(def, null, 2));
-}
-function saveMusic(tracks) {
-  fs.writeFileSync(MUSIC_FILE, JSON.stringify(tracks, null, 2));
+async function saveDrawings(drawings) {
+  await syncArrayCollection('drawings', drawings);
 }
 
-ensureBuiltinTracks({ musicDir: MUSIC_DIR, loadManifest: loadMusic, saveManifest: saveMusic });
+async function loadMusic() {
+  const db = await connectDb();
+  const docs = await db.collection('music').find().sort({ ts: 1 }).toArray();
+  return docs.map(({ _id, ...rest }) => ({ id: _id, ...rest }));
+}
+async function loadPlaylists() {
+  const db = await connectDb();
+  const docs = await db.collection('playlists').find().sort({ ts: 1 }).toArray();
+  return docs.map(({ _id, ...rest }) => ({ id: _id, ...rest }));
+}
+async function savePlaylists(playlists) {
+  await syncArrayCollection('playlists', playlists);
+}
+async function loadMusicDefault() {
+  const db = await connectDb();
+  const doc = await db.collection('musicDefault').findOne({ _id: 'default' });
+  return doc ? { trackId: doc.trackId, playlistId: doc.playlistId } : { trackId: null, playlistId: null };
+}
+async function saveMusicDefault(def) {
+  const db = await connectDb();
+  await db.collection('musicDefault').replaceOne(
+    { _id: 'default' },
+    { _id: 'default', trackId: def.trackId, playlistId: def.playlistId },
+    { upsert: true }
+  );
+}
+async function saveMusic(tracks) {
+  await syncArrayCollection('music', tracks);
+}
+// Called from the boot IIFE (awaited, after connectDb()) instead of here at
+// module load — loadManifest/saveManifest are now Mongo-backed and async.
 
+// Buffered in memory, not written to local disk — the upload handler pipes
+// req.file.buffer straight to Cloudinary. fileFilter/size-limit behavior is
+// unchanged from the old disk-storage config (those are multer-level
+// concerns, independent of where the bytes end up).
 const musicUpload = multer({
-  storage: multer.diskStorage({
-    destination: (req, file, cb) => {
-      fs.mkdirSync(MUSIC_DIR, { recursive: true });
-      cb(null, MUSIC_DIR);
-    },
-    filename: (req, file, cb) => {
-      const ext = path.extname(file.originalname) || (file.mimetype === 'audio/wav' ? '.wav' : '.mp3');
-      cb(null, `${crypto.randomUUID()}${ext}`);
-    },
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: MAX_MUSIC_BYTES },
   fileFilter: (req, file, cb) => {
     cb(null, MUSIC_MIME_TYPES.includes(file.mimetype));
@@ -163,8 +230,9 @@ const app = express();
 // files embedded as base64) — MAX_DRAWING_BYTES/MAX_MUSIC_BYTES below are
 // the real per-item caps, enforced independently of this parser limit.
 app.use(express.json({ limit: '150mb' }));
-app.use('/music', express.static(path.join(__dirname, 'public', 'music')));
-app.use('/drawings', express.static(path.join(__dirname, 'public', 'drawings')));
+// No /music or /drawings static mounts — both now live on Cloudinary and
+// carry their own absolute URL. /cursors stays: static app assets checked
+// into the repo, not user data.
 app.use('/cursors', express.static(path.join(__dirname, 'public', 'cursors')));
 app.use(express.static(path.join(__dirname, 'client', 'dist')));
 
@@ -185,36 +253,36 @@ app.get('/api/config', (req, res) => {
   res.json({ vapidPublicKey: process.env.VAPID_PUBLIC_KEY, sides: SIDES });
 });
 
-app.post('/api/register', requireAuth, (req, res) => {
+app.post('/api/register', requireAuth, async (req, res) => {
   const { subscription } = req.body;
-  const subs = loadSubs();
+  const subs = await loadSubs();
   subs[req.side] = subscription;
-  saveSubs(subs);
+  await saveSubs(subs);
   res.json({ ok: true });
 });
 
-app.get('/api/profile', requireAuth, (req, res) => {
-  res.json(getProfile(req.side));
+app.get('/api/profile', requireAuth, async (req, res) => {
+  res.json(await getProfile(req.side));
 });
 
-app.post('/api/profile', requireAuth, (req, res) => {
+app.post('/api/profile', requireAuth, async (req, res) => {
   const partnerNickname = String((req.body && req.body.partnerNickname) || '').trim().slice(0, 30);
   const bear = BEAR_OPTIONS.includes(req.body && req.body.bear) ? req.body.bear : DEFAULT_PROFILE.bear;
-  const profiles = loadProfiles();
+  const profiles = await loadProfiles();
   profiles[req.side] = {
     partnerNickname: partnerNickname || DEFAULT_PROFILE.partnerNickname,
     bear,
   };
-  saveProfiles(profiles);
-  res.json(getProfile(req.side));
+  await saveProfiles(profiles);
+  res.json(await getProfile(req.side));
 });
 
-app.get('/api/history', requireAuth, (req, res) => {
-  res.json(loadHistory());
+app.get('/api/history', requireAuth, async (req, res) => {
+  res.json(await loadHistory());
 });
 
-app.get('/api/recap', requireAuth, (req, res) => {
-  const history = loadHistory();
+app.get('/api/recap', requireAuth, async (req, res) => {
+  const history = await loadHistory();
   const recap = {
     taps: 0,
     wordleWins: 0,
@@ -236,7 +304,7 @@ app.get('/api/recap', requireAuth, (req, res) => {
   res.json(recap);
 });
 
-app.post('/api/drawings', requireAuth, (req, res) => {
+app.post('/api/drawings', requireAuth, async (req, res) => {
   const image = req.body && req.body.image;
   const match = typeof image === 'string' && image.match(/^data:image\/png;base64,(.+)$/);
   if (!match) return res.status(400).json({ error: 'expected a data:image/png;base64 string' });
@@ -246,84 +314,97 @@ app.post('/api/drawings', requireAuth, (req, res) => {
     return res.status(413).json({ error: 'drawing too large' });
   }
 
-  fs.mkdirSync(DRAWINGS_DIR, { recursive: true });
-  const id = crypto.randomUUID();
-  const filename = `${id}.png`;
-  fs.writeFileSync(path.join(DRAWINGS_DIR, filename), buffer);
+  try {
+    const id = crypto.randomUUID();
+    // Cloudinary accepts the data URI directly — no local write needed.
+    const uploaded = await cloudinary.uploader.upload(image, { folder: 'thinking-of-you/drawings', public_id: id });
+    const record = { id, ts: Date.now(), side: req.side, cloudinaryUrl: uploaded.secure_url, cloudinaryPublicId: uploaded.public_id };
+    await insertArrayItem('drawings', record);
+    await appendHistory('drawing_saved', req.side, { id });
 
-  const record = { id, ts: Date.now(), side: req.side, filename };
-  const drawings = loadDrawings();
-  drawings.push(record);
-  saveDrawings(drawings);
-  appendHistory('drawing_saved', req.side, { id });
-
-  res.json({ ...record, url: `/drawings/${filename}` });
+    res.json({ ...record, url: uploaded.secure_url });
+  } catch (err) {
+    console.error('[drawings] save failed:', err.message);
+    res.status(502).json({ error: "couldn't save drawing" });
+  }
 });
 
-app.get('/api/drawings', requireAuth, (req, res) => {
-  const drawings = loadDrawings()
-    .map((d) => ({ ...d, url: `/drawings/${d.filename}` }))
+app.get('/api/drawings', requireAuth, async (req, res) => {
+  const drawings = (await loadDrawings())
+    .map((d) => ({ ...d, url: d.cloudinaryUrl }))
     .sort((a, b) => b.ts - a.ts);
   res.json(drawings);
 });
 
-app.get('/api/music', requireAuth, (req, res) => {
-  const tracks = loadMusic()
-    .map((t) => ({ ...t, url: `/music/${t.filename}` }))
+app.get('/api/music', requireAuth, async (req, res) => {
+  const tracks = (await loadMusic())
+    .map((t) => ({ ...t, url: t.cloudinaryUrl }))
     .sort((a, b) => a.ts - b.ts);
   res.json(tracks);
 });
 
 app.post('/api/music/upload', requireAuth, (req, res) => {
-  musicUpload.single('file')(req, res, (err) => {
+  musicUpload.single('file')(req, res, async (err) => {
     if (err) return res.status(400).json({ error: err.message || 'upload failed' });
     if (!req.file) return res.status(400).json({ error: 'unsupported or missing file' });
 
-    const title = String((req.body && req.body.title) || path.parse(req.file.originalname).name || 'Untitled').trim().slice(0, 60) || 'Untitled';
-    const record = { id: crypto.randomUUID(), title, filename: req.file.filename, ts: Date.now(), side: req.side, builtin: false };
-    const tracks = loadMusic();
-    tracks.push(record);
-    saveMusic(tracks);
-    io.emit('music:tracks', tracks.map((t) => ({ ...t, url: `/music/${t.filename}` })));
+    try {
+      const title = String((req.body && req.body.title) || path.parse(req.file.originalname).name || 'Untitled').trim().slice(0, 60) || 'Untitled';
+      const id = crypto.randomUUID();
+      // Cloudinary categorizes non-image binary (audio included) under
+      // resource_type: 'video', not 'raw' or 'audio' — a real API quirk.
+      const uploaded = await new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          { resource_type: 'video', folder: 'thinking-of-you/music', public_id: id },
+          (uploadErr, result) => (uploadErr ? reject(uploadErr) : resolve(result))
+        );
+        stream.end(req.file.buffer);
+      });
+      const record = { id, title, ts: Date.now(), side: req.side, builtin: false, cloudinaryUrl: uploaded.secure_url, cloudinaryPublicId: uploaded.public_id };
+      await insertArrayItem('music', record);
+      const tracks = await loadMusic();
+      io.emit('music:tracks', tracks.map((t) => ({ ...t, url: t.cloudinaryUrl })));
 
-    res.json({ ...record, url: `/music/${record.filename}` });
+      res.json({ ...record, url: uploaded.secure_url });
+    } catch (uploadErr) {
+      console.error('[music] upload failed:', uploadErr.message);
+      res.status(502).json({ error: "couldn't upload — try again" });
+    }
   });
 });
 
-app.get('/api/playlists', requireAuth, (req, res) => {
+app.get('/api/playlists', requireAuth, async (req, res) => {
   // stored array order IS the display/play order (reorderable via
   // /api/playlists/reorder below) — no longer forced to creation-time order
-  res.json(loadPlaylists());
+  res.json(await loadPlaylists());
 });
 
-app.post('/api/playlists/reorder', requireAuth, (req, res) => {
+app.post('/api/playlists/reorder', requireAuth, async (req, res) => {
   const orderedIds = Array.isArray(req.body && req.body.orderedIds) ? req.body.orderedIds : [];
-  const playlists = loadPlaylists();
+  const playlists = await loadPlaylists();
   const byId = new Map(playlists.map((p) => [p.id, p]));
   const reordered = orderedIds.map((id) => byId.get(id)).filter(Boolean);
   // anything the client didn't mention (e.g. created by the partner in the
   // same instant) stays present, appended at the end, rather than dropped
   const missing = playlists.filter((p) => !orderedIds.includes(p.id));
   const next = [...reordered, ...missing];
-  savePlaylists(next);
+  await savePlaylists(next);
   io.emit('music:playlists', next);
   res.json(next);
 });
 
-app.post('/api/playlists', requireAuth, (req, res) => {
+app.post('/api/playlists', requireAuth, async (req, res) => {
   const name = String((req.body && req.body.name) || '').trim().slice(0, 60);
   if (!name) return res.status(400).json({ error: 'name is required' });
   const trackIds = Array.isArray(req.body && req.body.trackIds) ? req.body.trackIds.filter((id) => typeof id === 'string') : [];
   const record = { id: crypto.randomUUID(), name, trackIds, ts: Date.now() };
-  const playlists = loadPlaylists();
-  playlists.push(record);
-  savePlaylists(playlists);
-  io.emit('music:playlists', playlists);
+  await insertArrayItem('playlists', record);
+  io.emit('music:playlists', await loadPlaylists());
   res.json(record);
 });
 
-app.patch('/api/playlists/:id', requireAuth, (req, res) => {
-  const playlists = loadPlaylists();
+app.patch('/api/playlists/:id', requireAuth, async (req, res) => {
+  const playlists = await loadPlaylists();
   const playlist = playlists.find((p) => p.id === req.params.id);
   if (!playlist) return res.status(404).json({ error: 'not found' });
   if (typeof (req.body && req.body.name) === 'string') {
@@ -334,106 +415,28 @@ app.patch('/api/playlists/:id', requireAuth, (req, res) => {
   if (Array.isArray(req.body && req.body.trackIds)) {
     playlist.trackIds = req.body.trackIds.filter((id) => typeof id === 'string');
   }
-  savePlaylists(playlists);
+  await savePlaylists(playlists);
   io.emit('music:playlists', playlists);
   res.json(playlist);
 });
 
-app.delete('/api/playlists/:id', requireAuth, (req, res) => {
-  const playlists = loadPlaylists();
+app.delete('/api/playlists/:id', requireAuth, async (req, res) => {
+  const playlists = await loadPlaylists();
   const idx = playlists.findIndex((p) => p.id === req.params.id);
   if (idx === -1) return res.status(404).json({ error: 'not found' });
   playlists.splice(idx, 1);
-  savePlaylists(playlists);
+  await savePlaylists(playlists);
   io.emit('music:playlists', playlists);
   if (musicState.activePlaylistId === req.params.id) {
     musicState.activePlaylistId = null;
     io.emit('music:state', publicMusicState());
   }
-  const def = loadMusicDefault();
+  const def = await loadMusicDefault();
   if (def.playlistId === req.params.id) {
     const cleared = { trackId: null, playlistId: null };
-    saveMusicDefault(cleared);
+    await saveMusicDefault(cleared);
     io.emit('music:default', cleared);
   }
-  res.json({ ok: true });
-});
-
-// Everything below persists only to local JSON files + public/drawings and
-// public/music — fine for two people, but fatal on a host with an ephemeral
-// filesystem (e.g. Render's free tier resets the disk on every redeploy).
-// These two routes let you pull a full snapshot down before a redeploy and
-// push it back afterward, gated the same way as every other /api route
-// (requireAuth — this app's whole security model is "knows one of the two
-// names", so a bespoke secret here would be inconsistent, not more secure).
-function readFileB64(dir, filename) {
-  try {
-    return fs.readFileSync(path.join(dir, filename)).toString('base64');
-  } catch {
-    return null;
-  }
-}
-
-app.get('/api/admin/backup', requireAuth, (req, res) => {
-  const drawingsManifest = loadDrawings();
-  // Built-in ambient tracks are regenerated fresh on every boot by
-  // ensureBuiltinTracks() — backing them up would just be dead weight.
-  const musicManifest = loadMusic().filter((t) => !t.builtin);
-  res.json({
-    exportedAt: new Date().toISOString(),
-    subscriptions: loadSubs(),
-    profiles: loadProfiles(),
-    history: loadHistory(),
-    playlists: loadPlaylists(),
-    musicDefault: loadMusicDefault(),
-    drawings: {
-      manifest: drawingsManifest,
-      files: Object.fromEntries(
-        drawingsManifest
-          .map((d) => [d.filename, readFileB64(DRAWINGS_DIR, d.filename)])
-          .filter(([, b64]) => b64)
-      ),
-    },
-    music: {
-      manifest: musicManifest,
-      files: Object.fromEntries(
-        musicManifest
-          .map((t) => [t.filename, readFileB64(MUSIC_DIR, t.filename)])
-          .filter(([, b64]) => b64)
-      ),
-    },
-  });
-});
-
-app.post('/api/admin/restore', requireAuth, (req, res) => {
-  const data = req.body || {};
-  if (data.subscriptions) saveSubs(data.subscriptions);
-  if (data.profiles) saveProfiles(data.profiles);
-  if (Array.isArray(data.history)) fs.writeFileSync(HISTORY_FILE, JSON.stringify(data.history, null, 2));
-  if (Array.isArray(data.playlists)) savePlaylists(data.playlists);
-  if (data.musicDefault) saveMusicDefault(data.musicDefault);
-
-  if (data.drawings) {
-    fs.mkdirSync(DRAWINGS_DIR, { recursive: true });
-    for (const [filename, b64] of Object.entries(data.drawings.files || {})) {
-      fs.writeFileSync(path.join(DRAWINGS_DIR, filename), Buffer.from(b64, 'base64'));
-    }
-    if (Array.isArray(data.drawings.manifest)) saveDrawings(data.drawings.manifest);
-  }
-
-  if (data.music && Array.isArray(data.music.manifest)) {
-    fs.mkdirSync(MUSIC_DIR, { recursive: true });
-    for (const [filename, b64] of Object.entries(data.music.files || {})) {
-      fs.writeFileSync(path.join(MUSIC_DIR, filename), Buffer.from(b64, 'base64'));
-    }
-    // This boot's own ensureBuiltinTracks() already regenerated the builtin
-    // entries — keep those and layer the restored (non-builtin) tracks on
-    // top, rather than overwriting the manifest wholesale.
-    const builtins = loadMusic().filter((t) => t.builtin);
-    const restored = data.music.manifest.filter((t) => !builtins.some((b) => b.id === t.id));
-    saveMusic([...builtins, ...restored]);
-  }
-
   res.json({ ok: true });
 });
 
@@ -588,15 +591,17 @@ function sanitizeFontSize(size) {
 // play/pause/seek locally; they wait for the broadcast echo, so both
 // screens (and any extra devices on the same side) end up identical.
 let musicState = { trackId: null, isPlaying: true, positionAtStart: 0, startedAt: null, activePlaylistId: null, repeatMode: 'track' };
-{
-  // What plays on a fresh boot (this state resets whenever the server
-  // restarts) — prefers whichever song/playlist you two picked as the
-  // default (see music:setDefault), falling back to the first built-in
-  // ambient track if nothing's been chosen yet or the pick no longer exists.
-  const tracks = loadMusic();
-  const def = loadMusicDefault();
+// What plays on a fresh boot (this state resets whenever the server
+// restarts) — prefers whichever song/playlist you two picked as the
+// default (see music:setDefault), falling back to the first built-in
+// ambient track if nothing's been chosen yet or the pick no longer exists.
+// Called from the async boot sequence at the bottom of this file, after
+// connectDb() resolves (loadMusicDefault() is Mongo-backed).
+async function initMusicState() {
+  const tracks = await loadMusic();
+  const def = await loadMusicDefault();
   if (def.playlistId) {
-    const playlist = loadPlaylists().find((p) => p.id === def.playlistId);
+    const playlist = (await loadPlaylists()).find((p) => p.id === def.playlistId);
     const firstTrack = playlist && playlist.trackIds.map((id) => tracks.find((t) => t.id === id)).find(Boolean);
     if (firstTrack) {
       musicState.activePlaylistId = def.playlistId;
@@ -624,18 +629,19 @@ function selectTrack(trackId, extra) {
 // The list next/previous/repeat cycle through: the active playlist's tracks
 // (in playlist order, skipping any since-deleted ids) if one is set,
 // otherwise every track sorted by upload time — same as before playlists existed.
-function activeTrackList() {
-  const tracks = loadMusic();
+async function activeTrackList() {
+  const tracks = await loadMusic();
   if (musicState.activePlaylistId) {
-    const playlist = loadPlaylists().find((p) => p.id === musicState.activePlaylistId);
+    const playlists = await loadPlaylists();
+    const playlist = playlists.find((p) => p.id === musicState.activePlaylistId);
     if (playlist) {
       return playlist.trackIds.map((id) => tracks.find((t) => t.id === id)).filter(Boolean);
     }
   }
   return tracks.sort((a, b) => a.ts - b.ts);
 }
-function neighborTrackId(offset) {
-  const tracks = activeTrackList();
+async function neighborTrackId(offset) {
+  const tracks = await activeTrackList();
   if (!tracks.length) return null;
   const idx = tracks.findIndex((t) => t.id === musicState.trackId);
   const nextIdx = ((idx === -1 ? 0 : idx) + offset + tracks.length) % tracks.length;
@@ -679,7 +685,7 @@ io.on('connection', (socket) => {
   const otherSideOnConnect = SIDES.find((s) => s !== socket.side);
   socket.emit('activity:state', { side: otherSideOnConnect, activity: activityState[otherSideOnConnect] });
 
-  socket.on('activity:update', (data) => {
+  socket.on('activity:update', async (data) => {
     const activity = ACTIVITIES.includes(data && data.activity) ? data.activity : 'idle';
     const prev = activityState[socket.side];
     activityState[socket.side] = activity;
@@ -694,17 +700,17 @@ io.on('connection', (socket) => {
       if (otherIsOnline) {
         io.to(otherSide).emit('activity:ping', { side: socket.side });
       } else {
-        const subs = loadSubs();
+        const subs = await loadSubs();
         const sub = subs[otherSide];
         if (sub) {
           const payload = JSON.stringify({
-            title: `${getProfile(otherSide).partnerNickname} wants to play together! 🎮`,
+            title: `${(await getProfile(otherSide)).partnerNickname} wants to play together! 🎮`,
             body: 'Open the app to join an activity',
           });
-          webpush.sendNotification(sub, payload).catch((err) => {
+          webpush.sendNotification(sub, payload).catch(async (err) => {
             if (err.statusCode === 404 || err.statusCode === 410) {
               delete subs[otherSide];
-              saveSubs(subs);
+              await saveSubs(subs);
             }
           });
         }
@@ -717,16 +723,16 @@ io.on('connection', (socket) => {
     const otherSide = SIDES.find((s) => s !== side);
     const xFrac = data && typeof data.xFrac === 'number' ? data.xFrac : undefined;
     const yFrac = data && typeof data.yFrac === 'number' ? data.yFrac : undefined;
-    appendHistory('tap', side, {});
+    await appendHistory('tap', side, {});
 
     if (isOnline(otherSide)) {
       io.to(otherSide).emit('tap', { side, xFrac, yFrac });
     } else {
-      const subs = loadSubs();
+      const subs = await loadSubs();
       const sub = subs[otherSide];
       if (sub) {
         const payload = JSON.stringify({
-          title: `${getProfile(otherSide).partnerNickname} is thinking of you 💕`,
+          title: `${(await getProfile(otherSide)).partnerNickname} is thinking of you 💕`,
           body: 'Tap to open and send one back',
         });
         try {
@@ -734,7 +740,7 @@ io.on('connection', (socket) => {
         } catch (err) {
           if (err.statusCode === 404 || err.statusCode === 410) {
             delete subs[otherSide];
-            saveSubs(subs);
+            await saveSubs(subs);
           }
         }
       }
@@ -758,7 +764,7 @@ io.on('connection', (socket) => {
     if (isOnline(otherSide)) io.to(otherSide).emit('wordle:typing', { text: clean });
   });
 
-  socket.on('wordle:guess', (data) => {
+  socket.on('wordle:guess', async (data) => {
     if (!wordleState || wordleState.status !== 'playing') return;
     if (socket.side !== wordleState.turn) return;
     const clean = String((data && data.word) || '').toLowerCase().replace(/[^a-z]/g, '');
@@ -767,10 +773,10 @@ io.on('connection', (socket) => {
     wordleState.guesses.push({ word: clean, result, by: socket.side });
     if (clean === wordleState.target) {
       wordleState.status = 'won';
-      appendHistory('wordle_won', socket.side, { word: wordleState.target, guesses: wordleState.guesses.length });
+      await appendHistory('wordle_won', socket.side, { word: wordleState.target, guesses: wordleState.guesses.length });
     } else if (wordleState.guesses.length >= WORDLE_MAX_GUESSES) {
       wordleState.status = 'lost';
-      appendHistory('wordle_lost', socket.side, { word: wordleState.target, guesses: wordleState.guesses.length });
+      await appendHistory('wordle_lost', socket.side, { word: wordleState.target, guesses: wordleState.guesses.length });
     } else {
       wordleState.turn = SIDES.find((s) => s !== socket.side);
     }
@@ -786,7 +792,7 @@ io.on('connection', (socket) => {
     io.emit('hunt:state', huntState);
   });
 
-  socket.on('hunt:submit', (data) => {
+  socket.on('hunt:submit', async (data) => {
     const word = String((data && data.word) || '').toLowerCase().replace(/[^a-z]/g, '');
     if (word.length < 3) {
       socket.emit('hunt:invalid', { reason: 'too short' });
@@ -805,9 +811,9 @@ io.on('connection', (socket) => {
       return;
     }
     huntState.found.push({ word, by: socket.side });
-    appendHistory('hunt_word', socket.side, { word });
+    await appendHistory('hunt_word', socket.side, { word });
     if (huntState.found.length === huntState.target) {
-      appendHistory('hunt_completed', socket.side, { count: huntState.found.length });
+      await appendHistory('hunt_completed', socket.side, { count: huntState.found.length });
     }
     io.emit('hunt:state', huntState);
   });
@@ -960,18 +966,18 @@ io.on('connection', (socket) => {
   // the chosen aspect ratio (that's shared for the whole drawing). Scoped
   // to your own side already, so unlike finish/reset below it doesn't need
   // the other side's sign-off.
-  socket.on('draw:clear', () => {
+  socket.on('draw:clear', async () => {
     const side = socket.side;
     const hadStrokes = drawState[side].length > 0;
-    if (hadStrokes) appendHistory('draw_cleared', side, {});
+    if (hadStrokes) await appendHistory('draw_cleared', side, {});
     drawState[side] = [];
     drawRedoStack[side] = [];
     io.emit('draw:cleared', { side });
   });
 
-  function performDrawReset(requestingSide) {
+  async function performDrawReset(requestingSide) {
     const hadStrokes = drawState.blue.length > 0 || drawState.pink.length > 0;
-    if (hadStrokes) appendHistory('draw_reset', requestingSide, {});
+    if (hadStrokes) await appendHistory('draw_reset', requestingSide, {});
     drawState = { blue: [], pink: [] };
     drawRedoStack = { blue: [], pink: [] };
     drawAspectRatio = null;
@@ -1017,34 +1023,34 @@ io.on('connection', (socket) => {
     if (!isOnline(otherSide)) return socket.emit('draw:reset-unavailable');
     io.to(otherSide).emit('draw:reset-requested', { side: socket.side });
   });
-  socket.on('draw:reset-respond', ({ approved }) => {
+  socket.on('draw:reset-respond', async ({ approved }) => {
     const otherSide = SIDES.find((s) => s !== socket.side); // the original requester
-    if (approved) performDrawReset(otherSide);
+    if (approved) await performDrawReset(otherSide);
     if (isOnline(otherSide)) io.to(otherSide).emit('draw:reset-response', { approved: !!approved });
   });
 
-  socket.on('music:sync', () => {
+  socket.on('music:sync', async () => {
     socket.emit('music:state', publicMusicState());
-    socket.emit('music:default', loadMusicDefault());
+    socket.emit('music:default', await loadMusicDefault());
   });
 
-  // What plays next time the server restarts — persisted to disk since
+  // What plays next time the server restarts — persisted to Mongo since
   // musicState itself is memory-only. Exactly one of trackId/playlistId is
   // ever set; sending neither clears the default back to "no preference"
   // (falls back to the first built-in track on the next boot).
-  socket.on('music:setDefault', (data) => {
+  socket.on('music:setDefault', async (data) => {
     const trackId = data && data.trackId;
     const playlistId = data && data.playlistId;
-    if (playlistId && !loadPlaylists().some((p) => p.id === playlistId)) return;
-    if (trackId && !loadMusic().some((t) => t.id === trackId)) return;
+    if (playlistId && !(await loadPlaylists()).some((p) => p.id === playlistId)) return;
+    if (trackId && !(await loadMusic()).some((t) => t.id === trackId)) return;
     const def = playlistId ? { trackId: null, playlistId } : trackId ? { trackId, playlistId: null } : { trackId: null, playlistId: null };
-    saveMusicDefault(def);
+    await saveMusicDefault(def);
     io.emit('music:default', def);
   });
 
-  socket.on('music:select', (data) => {
+  socket.on('music:select', async (data) => {
     const trackId = data && data.trackId;
-    if (!trackId || !loadMusic().some((t) => t.id === trackId)) return;
+    if (!trackId || !(await loadMusic()).some((t) => t.id === trackId)) return;
     selectTrack(trackId);
     io.emit('music:state', publicMusicState());
   });
@@ -1073,23 +1079,23 @@ io.on('connection', (socket) => {
     io.emit('music:state', publicMusicState());
   });
 
-  socket.on('music:next', () => {
-    const id = neighborTrackId(1);
+  socket.on('music:next', async () => {
+    const id = await neighborTrackId(1);
     if (id) selectTrack(id);
     io.emit('music:state', publicMusicState());
   });
 
-  socket.on('music:previous', () => {
-    const id = neighborTrackId(-1);
+  socket.on('music:previous', async () => {
+    const id = await neighborTrackId(-1);
     if (id) selectTrack(id);
     io.emit('music:state', publicMusicState());
   });
 
-  socket.on('music:selectPlaylist', (data) => {
+  socket.on('music:selectPlaylist', async (data) => {
     const playlistId = data && data.playlistId ? data.playlistId : null;
-    if (playlistId && !loadPlaylists().some((p) => p.id === playlistId)) return;
+    if (playlistId && !(await loadPlaylists()).some((p) => p.id === playlistId)) return;
     musicState.activePlaylistId = playlistId;
-    const tracks = activeTrackList();
+    const tracks = await activeTrackList();
     if (tracks.length) selectTrack(tracks[0].id);
     io.emit('music:state', publicMusicState());
   });
@@ -1106,15 +1112,15 @@ io.on('connection', (socket) => {
   // 'ended' from the OTHER partner's tab (same track, same moment) is a no-op
   // once the first one has already advanced/restarted state — otherwise we'd
   // double-skip.
-  socket.on('music:ended', (data) => {
+  socket.on('music:ended', async (data) => {
     if (!data || data.trackId !== musicState.trackId) return;
     if (musicState.repeatMode === 'track') {
       selectTrack(musicState.trackId);
     } else if (musicState.repeatMode === 'playlist') {
-      const id = neighborTrackId(1);
+      const id = await neighborTrackId(1);
       if (id) selectTrack(id);
     } else {
-      const tracks = activeTrackList();
+      const tracks = await activeTrackList();
       const idx = tracks.findIndex((t) => t.id === musicState.trackId);
       if (idx !== -1 && idx < tracks.length - 1) {
         selectTrack(tracks[idx + 1].id);
@@ -1138,5 +1144,52 @@ io.on('connection', (socket) => {
   });
 });
 
-const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+// Migrating storage from sync fs calls to async Mongo/Cloudinary calls
+// means a LOT of route/socket handlers can now reject (network blip, a bad
+// write, etc.) — Express 4 doesn't catch async handler rejections on its
+// own, and Node's default behavior for an unhandled rejection is to crash
+// the entire process (confirmed painfully during testing — one bad
+// request took down the server for both partners, not just that request).
+// Handlers that return a response wrap their own await in try/catch (see
+// /api/drawings, /api/music/upload) so failures become a proper HTTP
+// error instead of a crash; this is the backstop for anything else.
+process.on('unhandledRejection', (err) => {
+  console.error('[unhandled rejection]', err);
+});
+
+// server.js is CommonJS (require, not import), so top-level await isn't
+// available — an async IIFE is the boot sequence instead of converting the
+// whole module system just for this. Mongo must be connected before
+// initMusicState() (which reads musicDefault from it) and before the
+// server starts accepting connections at all, since handlers assume
+// musicState is already valid the moment a socket connects.
+(async () => {
+  const db = await connectDb();
+  console.log('[mongo] connected');
+  await ensureHistoryCollection(db);
+  try {
+    await cloudinary.api.ping();
+    console.log('[cloudinary] connected');
+  } catch (err) {
+    console.error('[cloudinary] connection failed:', err.message);
+  }
+  await ensureBuiltinTracks({
+    loadManifest: loadMusic,
+    saveManifest: saveMusic,
+    uploadBuffer: (wavBuffer, id) =>
+      new Promise((resolve, reject) => {
+        const stream = cloudinary.uploader.upload_stream(
+          { resource_type: 'video', folder: 'thinking-of-you/music', public_id: id },
+          (err, result) => (err ? reject(err) : resolve({ cloudinaryUrl: result.secure_url, cloudinaryPublicId: result.public_id }))
+        );
+        stream.end(wavBuffer);
+      }),
+  });
+  await initMusicState();
+
+  const PORT = process.env.PORT || 3000;
+  server.listen(PORT, () => console.log(`Server running on port ${PORT}`));
+})().catch((err) => {
+  console.error('Fatal error during startup:', err);
+  process.exit(1);
+});
