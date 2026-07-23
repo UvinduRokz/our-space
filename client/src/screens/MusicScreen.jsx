@@ -30,7 +30,20 @@ export default function MusicScreen() {
     selectPlaylist,
     volumeSlider,
     setVolume,
+    musicDefault,
+    setDefaultTrack,
+    setDefaultPlaylist,
+    clearDefault,
   } = useMusic();
+
+  function toggleDefaultTrack(trackId) {
+    if (musicDefault.trackId === trackId) clearDefault();
+    else setDefaultTrack(trackId);
+  }
+  function toggleDefaultPlaylist(playlistId) {
+    if (musicDefault.playlistId === playlistId) clearDefault();
+    else setDefaultPlaylist(playlistId);
+  }
 
   // re-render periodically so the seek bar / elapsed time keep advancing
   // between server updates, matching the old app's 500ms refresh tick —
@@ -226,14 +239,18 @@ export default function MusicScreen() {
         onSave={savePlaylist}
         onCancel={closeBuilder}
         status={builderStatus}
+        defaultPlaylistId={musicDefault.playlistId}
+        onToggleDefault={toggleDefaultPlaylist}
       />
 
       <TrackList
         tracks={tracks}
         playingId={lastState?.trackId}
         builderMode={builderOpen}
+        defaultTrackId={musicDefault.trackId}
         onSelect={selectTrack}
         onAddToBuilder={addTrackToBuilder}
+        onToggleDefault={toggleDefaultTrack}
       />
 
       <form className="music-upload-form" onSubmit={handleUpload}>

@@ -29,6 +29,7 @@ const DRAWINGS_FILE = path.join(__dirname, 'drawings.json');
 const DRAWINGS_DIR = path.join(__dirname, 'public', 'drawings');
 const MAX_DRAWING_BYTES = 2 * 1024 * 1024;
 const MUSIC_FILE = path.join(__dirname, 'music.json');
+const MUSIC_DEFAULT_FILE = path.join(__dirname, 'music-default.json');
 const PLAYLISTS_FILE = path.join(__dirname, 'playlists.json');
 const MUSIC_DIR = path.join(__dirname, 'public', 'music');
 const MAX_MUSIC_BYTES = 15 * 1024 * 1024;
@@ -122,6 +123,17 @@ function loadPlaylists() {
 }
 function savePlaylists(playlists) {
   fs.writeFileSync(PLAYLISTS_FILE, JSON.stringify(playlists, null, 2));
+}
+function loadMusicDefault() {
+  if (!fs.existsSync(MUSIC_DEFAULT_FILE)) return { trackId: null, playlistId: null };
+  try {
+    return JSON.parse(fs.readFileSync(MUSIC_DEFAULT_FILE, 'utf8'));
+  } catch {
+    return { trackId: null, playlistId: null };
+  }
+}
+function saveMusicDefault(def) {
+  fs.writeFileSync(MUSIC_DEFAULT_FILE, JSON.stringify(def, null, 2));
 }
 function saveMusic(tracks) {
   fs.writeFileSync(MUSIC_FILE, JSON.stringify(tracks, null, 2));
@@ -338,6 +350,12 @@ app.delete('/api/playlists/:id', requireAuth, (req, res) => {
     musicState.activePlaylistId = null;
     io.emit('music:state', publicMusicState());
   }
+  const def = loadMusicDefault();
+  if (def.playlistId === req.params.id) {
+    const cleared = { trackId: null, playlistId: null };
+    saveMusicDefault(cleared);
+    io.emit('music:default', cleared);
+  }
   res.json({ ok: true });
 });
 
@@ -367,6 +385,7 @@ app.get('/api/admin/backup', requireAuth, (req, res) => {
     profiles: loadProfiles(),
     history: loadHistory(),
     playlists: loadPlaylists(),
+    musicDefault: loadMusicDefault(),
     drawings: {
       manifest: drawingsManifest,
       files: Object.fromEntries(
@@ -392,6 +411,7 @@ app.post('/api/admin/restore', requireAuth, (req, res) => {
   if (data.profiles) saveProfiles(data.profiles);
   if (Array.isArray(data.history)) fs.writeFileSync(HISTORY_FILE, JSON.stringify(data.history, null, 2));
   if (Array.isArray(data.playlists)) savePlaylists(data.playlists);
+  if (data.musicDefault) saveMusicDefault(data.musicDefault);
 
   if (data.drawings) {
     fs.mkdirSync(DRAWINGS_DIR, { recursive: true });
@@ -569,8 +589,26 @@ function sanitizeFontSize(size) {
 // screens (and any extra devices on the same side) end up identical.
 let musicState = { trackId: null, isPlaying: true, positionAtStart: 0, startedAt: null, activePlaylistId: null, repeatMode: 'track' };
 {
-  const builtins = loadMusic().filter((t) => t.builtin).sort((a, b) => a.ts - b.ts);
-  if (builtins.length) musicState.trackId = builtins[0].id;
+  // What plays on a fresh boot (this state resets whenever the server
+  // restarts) — prefers whichever song/playlist you two picked as the
+  // default (see music:setDefault), falling back to the first built-in
+  // ambient track if nothing's been chosen yet or the pick no longer exists.
+  const tracks = loadMusic();
+  const def = loadMusicDefault();
+  if (def.playlistId) {
+    const playlist = loadPlaylists().find((p) => p.id === def.playlistId);
+    const firstTrack = playlist && playlist.trackIds.map((id) => tracks.find((t) => t.id === id)).find(Boolean);
+    if (firstTrack) {
+      musicState.activePlaylistId = def.playlistId;
+      musicState.trackId = firstTrack.id;
+    }
+  } else if (def.trackId && tracks.some((t) => t.id === def.trackId)) {
+    musicState.trackId = def.trackId;
+  }
+  if (!musicState.trackId) {
+    const builtins = tracks.filter((t) => t.builtin).sort((a, b) => a.ts - b.ts);
+    if (builtins.length) musicState.trackId = builtins[0].id;
+  }
 }
 
 function currentMusicPosition() {
@@ -987,6 +1025,21 @@ io.on('connection', (socket) => {
 
   socket.on('music:sync', () => {
     socket.emit('music:state', publicMusicState());
+    socket.emit('music:default', loadMusicDefault());
+  });
+
+  // What plays next time the server restarts — persisted to disk since
+  // musicState itself is memory-only. Exactly one of trackId/playlistId is
+  // ever set; sending neither clears the default back to "no preference"
+  // (falls back to the first built-in track on the next boot).
+  socket.on('music:setDefault', (data) => {
+    const trackId = data && data.trackId;
+    const playlistId = data && data.playlistId;
+    if (playlistId && !loadPlaylists().some((p) => p.id === playlistId)) return;
+    if (trackId && !loadMusic().some((t) => t.id === trackId)) return;
+    const def = playlistId ? { trackId: null, playlistId } : trackId ? { trackId, playlistId: null } : { trackId: null, playlistId: null };
+    saveMusicDefault(def);
+    io.emit('music:default', def);
   });
 
   socket.on('music:select', (data) => {

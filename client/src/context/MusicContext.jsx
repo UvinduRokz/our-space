@@ -31,6 +31,11 @@ export function MusicProvider({ children }) {
   const [tracks, setTracks] = useState([]);
   const [playlists, setPlaylists] = useState([]);
   const [lastState, setLastState] = useState(null);
+  // What plays on the NEXT server boot, not what's playing now — see
+  // music:setDefault in server.js. Persisted server-side (musicState
+  // itself is memory-only, so without this "what plays" would silently
+  // reset to a built-in track on every redeploy).
+  const [musicDefault, setMusicDefault] = useState({ trackId: null, playlistId: null });
   const [needsSyncTap, setNeedsSyncTap] = useState(false);
   const [volumeSlider, setVolumeSlider] = useState(() => {
     const saved = localStorage.getItem('music_volume');
@@ -125,6 +130,7 @@ export function MusicProvider({ children }) {
     socket.on('music:state', setLastState);
     socket.on('music:tracks', onTracks);
     socket.on('music:playlists', onPlaylists);
+    socket.on('music:default', setMusicDefault);
     audio.addEventListener('ended', onEnded);
 
     refreshTracks();
@@ -144,6 +150,7 @@ export function MusicProvider({ children }) {
       socket.off('music:state', setLastState);
       socket.off('music:tracks', onTracks);
       socket.off('music:playlists', onPlaylists);
+      socket.off('music:default', setMusicDefault);
       audio.removeEventListener('ended', onEnded);
       clearInterval(driftInterval);
     };
@@ -230,6 +237,10 @@ export function MusicProvider({ children }) {
     next: () => socket.emit('music:next'),
     seek: (position) => socket.emit('music:seek', { position }),
     selectPlaylist: (playlistId) => socket.emit('music:selectPlaylist', { playlistId }),
+    musicDefault,
+    setDefaultTrack: (trackId) => socket.emit('music:setDefault', { trackId }),
+    setDefaultPlaylist: (playlistId) => socket.emit('music:setDefault', { playlistId }),
+    clearDefault: () => socket.emit('music:setDefault', {}),
   };
 
   return (

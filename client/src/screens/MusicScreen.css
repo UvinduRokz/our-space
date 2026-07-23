@@ -71,6 +71,16 @@
   font-size: 0.7rem;
   opacity: 0.6;
 }
+.music-default-star {
+  background: none;
+  padding: 0 4px;
+  font-size: 0.95rem;
+  opacity: 0.5;
+  flex-shrink: 0;
+}
+.music-default-star.active {
+  opacity: 1;
+}
 
 .music-playlists {
   width: 100%;

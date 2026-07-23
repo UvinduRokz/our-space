@@ -56,6 +56,8 @@ export default function PlaylistSection({
   onSave,
   onCancel,
   status,
+  defaultPlaylistId,
+  onToggleDefault,
 }) {
   const playlistDrag = useDragReorder(onReorderPlaylists);
   const trackDrag = useDragReorder(onReorderBuilderTrack);
@@ -85,6 +87,15 @@ export default function PlaylistSection({
               <span className="music-playlist-count" onClick={() => onActivate(isActive ? null : p.id)}>
                 {p.trackIds.length} track{p.trackIds.length === 1 ? '' : 's'}
               </span>
+              <Tooltip text={defaultPlaylistId === p.id ? 'Default playlist — tap to unset' : 'Set as default playlist'}>
+                <button
+                  type="button"
+                  className={`music-default-star${defaultPlaylistId === p.id ? ' active' : ''}`}
+                  onClick={(e) => { e.stopPropagation(); onToggleDefault(p.id); }}
+                >
+                  {defaultPlaylistId === p.id ? '⭐' : '☆'}
+                </button>
+              </Tooltip>
               <Tooltip text="Edit playlist">
                 <button type="button" className="music-playlist-edit" onClick={(e) => { e.stopPropagation(); onEdit(p); }}>
                   ✎
