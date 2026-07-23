@@ -71,21 +71,37 @@ function sideForName(name) {
 // blue/pink keyed objects, same shape every call site already expects —
 // only the body changed (Mongo doc per side, _id: side) rather than one
 // JSON file, so every caller just gains async/await.
-async function loadSubs() {
+// One document per DEVICE, not per side — a push subscription's endpoint
+// URL is already unique per browser+device, so it doubles as a natural
+// Mongo _id. This is what lets the same person register from both their
+// phone and their desktop and get notified on both, instead of the second
+// registration silently overwriting the first.
+async function addSub(side, subscription) {
+  if (!subscription || !subscription.endpoint) return;
   const db = await connectDb();
-  const docs = await db.collection('subscriptions').find().toArray();
-  const subs = {};
-  for (const { _id, ...rest } of docs) subs[_id] = rest;
-  return subs;
-}
-async function saveSubs(subs) {
-  const db = await connectDb();
-  const ops = SIDES.map((side) =>
-    subs[side]
-      ? { replaceOne: { filter: { _id: side }, replacement: { _id: side, ...subs[side] }, upsert: true } }
-      : { deleteOne: { filter: { _id: side } } }
+  await db.collection('subscriptions').replaceOne(
+    { _id: subscription.endpoint },
+    { _id: subscription.endpoint, side, keys: subscription.keys },
+    { upsert: true }
   );
-  await db.collection('subscriptions').bulkWrite(ops);
+}
+async function removeSub(endpoint) {
+  const db = await connectDb();
+  await db.collection('subscriptions').deleteOne({ _id: endpoint });
+}
+// Sends to every device registered for that side, not just one — a dead
+// endpoint (404/410, the device unsubscribed or the registration expired)
+// only removes THAT device, the rest still get the notification.
+async function sendPushToSide(side, payload) {
+  const db = await connectDb();
+  const subs = await db.collection('subscriptions').find({ side }).toArray();
+  await Promise.all(
+    subs.map((sub) =>
+      webpush.sendNotification({ endpoint: sub._id, keys: sub.keys }, payload).catch((err) => {
+        if (err.statusCode === 404 || err.statusCode === 410) return removeSub(sub._id);
+      })
+    )
+  );
 }
 
 async function loadProfiles() {
@@ -255,9 +271,7 @@ app.get('/api/config', (req, res) => {
 
 app.post('/api/register', requireAuth, async (req, res) => {
   const { subscription } = req.body;
-  const subs = await loadSubs();
-  subs[req.side] = subscription;
-  await saveSubs(subs);
+  await addSub(req.side, subscription);
   res.json({ ok: true });
 });
 
@@ -717,21 +731,12 @@ io.on('connection', (socket) => {
       if (otherIsOnline) {
         io.to(otherSide).emit('activity:ping', { side: socket.side });
       } else {
-        const subs = await loadSubs();
-        const sub = subs[otherSide];
-        if (sub) {
-          const payload = JSON.stringify({
-            title: `${(await getProfile(otherSide)).partnerNickname} wants to play together! 🎮`,
-            body: 'Open the app to join an activity',
-            icon: `/cursors/${(await getProfile(socket.side)).bear}-idle.svg`,
-          });
-          webpush.sendNotification(sub, payload).catch(async (err) => {
-            if (err.statusCode === 404 || err.statusCode === 410) {
-              delete subs[otherSide];
-              await saveSubs(subs);
-            }
-          });
-        }
+        const payload = JSON.stringify({
+          title: `${(await getProfile(otherSide)).partnerNickname} wants to play together! 🎮`,
+          body: 'Open the app to join an activity',
+          icon: `/cursors/${(await getProfile(socket.side)).bear}-idle.svg`,
+        });
+        await sendPushToSide(otherSide, payload);
       }
     }
   });
@@ -746,23 +751,12 @@ io.on('connection', (socket) => {
     if (isOnline(otherSide)) {
       io.to(otherSide).emit('tap', { side, xFrac, yFrac });
     } else {
-      const subs = await loadSubs();
-      const sub = subs[otherSide];
-      if (sub) {
-        const payload = JSON.stringify({
-          title: `${(await getProfile(otherSide)).partnerNickname} is thinking of you 💕`,
-          body: 'Tap to open and send one back',
-          icon: `/cursors/${(await getProfile(side)).bear}-idle.svg`,
-        });
-        try {
-          await webpush.sendNotification(sub, payload);
-        } catch (err) {
-          if (err.statusCode === 404 || err.statusCode === 410) {
-            delete subs[otherSide];
-            await saveSubs(subs);
-          }
-        }
-      }
+      const payload = JSON.stringify({
+        title: `${(await getProfile(otherSide)).partnerNickname} is thinking of you 💕`,
+        body: 'Tap to open and send one back',
+        icon: `/cursors/${(await getProfile(side)).bear}-idle.svg`,
+      });
+      await sendPushToSide(otherSide, payload);
     }
   });
 
