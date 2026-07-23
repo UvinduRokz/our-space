@@ -847,6 +847,12 @@ export default function DrawScreen() {
       setResetConfirm(null);
       showDrawStatus(`${profile.partnerNickname} isn't online right now`);
     }
+    function onFinishSaved({ url }) {
+      setReveal(url);
+    }
+    function onFinishClosed() {
+      setReveal(null);
+    }
 
     canvas.addEventListener('pointerdown', onPointerDown);
     canvas.addEventListener('pointermove', onPointerMove);
@@ -870,6 +876,8 @@ export default function DrawScreen() {
     socket.on('draw:reset-requested', onResetRequested);
     socket.on('draw:reset-response', onResetResponse);
     socket.on('draw:reset-unavailable', onResetUnavailable);
+    socket.on('draw:finish-saved', onFinishSaved);
+    socket.on('draw:finish-closed', onFinishClosed);
 
     socket.emit('draw:sync');
 
@@ -895,6 +903,8 @@ export default function DrawScreen() {
       socket.off('draw:reset-requested', onResetRequested);
       socket.off('draw:reset-response', onResetResponse);
       socket.off('draw:reset-unavailable', onResetUnavailable);
+      socket.off('draw:finish-saved', onFinishSaved);
+      socket.off('draw:finish-closed', onFinishClosed);
       eng.isDrawing = false;
       eng.lastLocalPoint = null;
       eng.shapeStart = null;
@@ -1033,7 +1043,9 @@ export default function DrawScreen() {
     const dataUrl = exportCanvas.toDataURL('image/png');
     try {
       const saved = await apiPost('/api/drawings', { image: dataUrl });
-      setReveal(saved.url);
+      // Broadcast rather than setReveal(saved.url) directly — the reveal
+      // should show on BOTH screens, not just whoever clicked Finish.
+      socket.emit('draw:finish-saved', { url: saved.url });
     } catch (err) {
       console.error('[draw] failed to save drawing', err);
       showDrawStatus("couldn't save — try again");
@@ -1041,8 +1053,10 @@ export default function DrawScreen() {
   }
 
   function handleRevealClose() {
-    setReveal(null);
-    socket.emit('draw:clear');
+    // Server clears both sides and tells both clients to dismiss the
+    // reveal (see draw:finish-close in server.js) — whichever of you
+    // closes it first ends it for both.
+    socket.emit('draw:finish-close');
   }
 
   function handleClear() {

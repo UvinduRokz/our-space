@@ -956,6 +956,24 @@ io.on('connection', (socket) => {
     if (isOnline(otherSide)) io.to(otherSide).emit('draw:finish-response', { approved: !!approved });
   });
 
+  // The requester's client does the actual save (compositing + POST
+  // /api/drawings) once approved, then reports the result here so BOTH
+  // sides see the finished image, not just whoever clicked Finish.
+  socket.on('draw:finish-saved', ({ url }) => {
+    if (typeof url === 'string') io.emit('draw:finish-saved', { url });
+  });
+
+  // Whichever side closes the reveal first clears the drawing for BOTH —
+  // the shape/aspect ratio stays put (unlike draw:reset) since you're
+  // just moving on to a new drawing at the same canvas shape, not
+  // starting over from the picker.
+  socket.on('draw:finish-close', () => {
+    drawState = { blue: [], pink: [] };
+    drawRedoStack = { blue: [], pink: [] };
+    io.emit('draw:cleared', { side: null });
+    io.emit('draw:finish-closed');
+  });
+
   socket.on('draw:reset-request', () => {
     const otherSide = SIDES.find((s) => s !== socket.side);
     if (!isOnline(otherSide)) return socket.emit('draw:reset-unavailable');
